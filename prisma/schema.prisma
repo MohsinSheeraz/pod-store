@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  IN_PRODUCTION
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum ZoneKind {
+  IMAGE
+  TEXT
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(CUSTOMER)
+  designs   Design[]
+  orders    Order[]
+  cart      Cart?
+  createdAt DateTime @default(now())
+}
+
+model Category {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  slug     String    @unique
+  products Product[]
+}
+
+// A blank product that can be printed on (tee, mug, tote...)
+model Product {
+  id          String           @id @default(cuid())
+  slug        String           @unique
+  name        String
+  description String
+  basePrice   Decimal          @db.Decimal(10, 2)
+  imageUrl    String?
+  active      Boolean          @default(true)
+  category    Category         @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  variants    ProductVariant[]
+  zones       PrintZone[]
+  createdAt   DateTime         @default(now())
+}
+
+// A place on a product where something can be printed (front, back, sleeve, monogram...)
+model PrintZone {
+  id         String          @id @default(cuid())
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String
+  key        String
+  label      String
+  view       String          @default("front") // mockup view that shows it: "front" | "back"
+  kind       ZoneKind        @default(IMAGE)
+  // Position and size on the 400 x 420 mockup, in percent
+  x          Float
+  y          Float
+  w          Float
+  h          Float
+  // Real printed size, used for the print-quality (DPI) check
+  widthIn    Float
+  heightIn   Float
+  fee        Decimal         @default(0) @db.Decimal(10, 2)
+  sortOrder  Int             @default(0)
+  cartPrints CartItemPrint[]
+
+  @@unique([productId, key])
+}
+
+// A color + size combination of a product
+model ProductVariant {
+  id         String      @id @default(cuid())
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String
+  color      String
+  colorHex   String
+  size       String      @default("One size")
+  priceDelta Decimal     @default(0) @db.Decimal(10, 2)
+  available  Boolean     @default(true)
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@unique([productId, color, size])
+}
+
+// Artwork: uploaded by a customer, or published by admins in the catalog
+model Design {
+  id          String           @id @default(cuid())
+  name        String
+  imageUrl    String
+  isCatalog   Boolean          @default(false)
+  owner       User?            @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  ownerId     String?
+  cartPrints  CartItemPrint[]
+  orderPrints OrderItemPrint[]
+  createdAt   DateTime         @default(now())
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  user      User       @relation(fields: [userId], references: [id])
+  userId    String     @unique
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+}
+
+// One product option in the cart, with 1..N prints on it
+model CartItem {
+  id        String          @id @default(cuid())
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cartId    String
+  variant   ProductVariant  @relation(fields: [variantId], references: [id])
+  variantId String
+  quantity  Int             @default(1)
+  prints    CartItemPrint[]
+}
+
+// What is printed in one zone: either an image or a text layer
+model CartItemPrint {
+  id         String    @id @default(cuid())
+  cartItem   CartItem  @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  cartItemId String
+  zone       PrintZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  zoneId     String
+  design     Design?   @relation(fields: [designId], references: [id], onDelete: SetNull)
+  designId   String?
+  text       String?
+  font       String?
+  color      String?
+  // { x, y, scale, rotation } relative to the zone
+  placement  Json
+
+  @@unique([cartItemId, zoneId])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  user            User        @relation(fields: [userId], references: [id])
+  userId          String
+  status          OrderStatus @default(PENDING)
+  total           Decimal     @db.Decimal(10, 2)
+  shippingAddress Json
+  items           OrderItem[]
+  createdAt       DateTime    @default(now())
+}
+
+// Snapshot of what was ordered, so later catalog edits never change past orders
+model OrderItem {
+  id           String           @id @default(cuid())
+  order        Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      String
+  variant      ProductVariant?  @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  variantId    String?
+  productName  String
+  variantLabel String
+  quantity     Int
+  unitPrice    Decimal          @db.Decimal(10, 2)
+  prints       OrderItemPrint[]
+}
+
+model OrderItemPrint {
+  id             String    @id @default(cuid())
+  orderItem      OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItemId    String
+  zoneLabel      String
+  kind           ZoneKind
+  design         Design?   @relation(fields: [designId], references: [id], onDelete: SetNull)
+  designId       String?
+  designImageUrl String?
+  text           String?
+  font           String?
+  color          String?
+  placement      Json
+  fee            Decimal   @default(0) @db.Decimal(10, 2)
+}
