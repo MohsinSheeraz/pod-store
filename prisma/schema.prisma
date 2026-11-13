@@ -157,7 +157,11 @@ model Order {
   userId          String
   status          OrderStatus @default(PENDING)
   total           Decimal     @db.Decimal(10, 2)
+  // { name, phone, line1, city, postalCode, country }
   shippingAddress Json
+  trackingNumber  String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
   items           OrderItem[]
   createdAt       DateTime    @default(now())
 }
@@ -171,6 +175,9 @@ model OrderItem {
   variantId    String?
   productName  String
   variantLabel String
+  // Mockup silhouette ("tee" | "hoodie" | "mug" | "tote" | "poster") and its fill color
+  shape        String           @default("tee")
+  colorHex     String           @default("#FFFFFF")
   quantity     Int
   unitPrice    Decimal          @db.Decimal(10, 2)
   prints       OrderItemPrint[]
@@ -182,6 +189,12 @@ model OrderItemPrint {
   orderItemId    String
   zoneLabel      String
   kind           ZoneKind
+  // Where the zone sat on the mockup when ordered (percent of 400 x 420)
+  view           String    @default("front")
+  zoneX          Float     @default(0)
+  zoneY          Float     @default(0)
+  zoneW          Float     @default(0)
+  zoneH          Float     @default(0)
   design         Design?   @relation(fields: [designId], references: [id], onDelete: SetNull)
   designId       String?
   designImageUrl String?

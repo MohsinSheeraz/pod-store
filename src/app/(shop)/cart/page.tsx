@@ -93,6 +93,7 @@ export default async function CartPage() {
 
   const subtotal = rows.filter((r) => r.purchasable).reduce((sum, r) => sum + r.lineTotal, 0);
   const itemCount = rows.filter((r) => r.purchasable).reduce((sum, r) => sum + r.quantity, 0);
+  const hasBlocked = rows.some((r) => !r.purchasable);
 
   return (
     <div className="container cart-page">
@@ -169,7 +170,13 @@ export default async function CartPage() {
               <span>Subtotal</span>
               <strong>{formatMoney(subtotal)}</strong>
             </div>
-            <p className="hint">Checkout isn&apos;t available yet. Your cart is saved to your account.</p>
+            {hasBlocked ? (
+              <p className="warn">Remove the unavailable items to check out.</p>
+            ) : (
+              <Link href="/checkout" className="btn btn-primary btn-block">
+                Checkout
+              </Link>
+            )}
             <Link href="/#products" className="btn btn-ghost btn-block">
               Continue shopping
             </Link>
