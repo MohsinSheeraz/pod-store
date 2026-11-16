@@ -44,36 +44,32 @@ const tshirtSizes = [
 ];
 
 // Fees: back +4, sleeve +2.50, monogram +3. Change them here.
+// Monogram is a left-chest print: it sits on the wearer's left (right-hand side of the front
+// view) and only takes text. See src/lib/placement-rules.ts.
 const teeZones: SeedZone[] = [
-  {
-    key: "monogram",
-    label: "Left chest monogram",
-    view: "front",
-    kind: "TEXT",
-    x: 54,
-    y: 22,
-    w: 14,
-    h: 13,
-    widthIn: 3.5,
-    heightIn: 3.4,
-    fee: 3,
-  },
+  { key: "front", label: "Front", view: "front", x: 28, y: 27, w: 44, h: 42, widthIn: 12, heightIn: 14 },
+  { key: "back", label: "Back", view: "back", x: 27, y: 22, w: 46, h: 46, widthIn: 12, heightIn: 14, fee: 4 },
+  { key: "right-sleeve", label: "Right sleeve", view: "front", x: 8.5, y: 22, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "left-sleeve", label: "Left sleeve", view: "front", x: 82.5, y: 22, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "monogram", label: "Left chest monogram", view: "front", kind: "TEXT", x: 54, y: 22, w: 14, h: 13, widthIn: 3.5, heightIn: 3.4, fee: 3 },
 ];
 
 const hoodieZones: SeedZone[] = [
-  {
-    key: "monogram",
-    label: "Left chest monogram",
-    view: "front",
-    kind: "TEXT",
-    x: 55,
-    y: 28,
-    w: 13,
-    h: 12,
-    widthIn: 3.2,
-    heightIn: 3.3,
-    fee: 3,
-  },
+  { key: "front", label: "Front", view: "front", x: 30, y: 38, w: 40, h: 32, widthIn: 11, heightIn: 12 },
+  { key: "back", label: "Back", view: "back", x: 28, y: 26, w: 44, h: 46, widthIn: 12, heightIn: 14, fee: 4.5 },
+  { key: "right-sleeve", label: "Right sleeve", view: "front", x: 10.5, y: 27, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "left-sleeve", label: "Left sleeve", view: "front", x: 80.5, y: 27, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "monogram", label: "Left chest monogram", view: "front", kind: "TEXT", x: 55, y: 28, w: 13, h: 12, widthIn: 3.2, heightIn: 3.3, fee: 3 },
+];
+
+// Ready-made artwork shoppers can place without uploading anything (files in /public/designs).
+const catalogDesigns = [
+  { name: "Sunset Wave", file: "sunset-wave.svg" },
+  { name: "Mountain Badge", file: "mountain-badge.svg" },
+  { name: "Bold Star", file: "bold-star.svg" },
+  { name: "Retro Stripes", file: "retro-stripes.svg" },
+  { name: "Leaf Line", file: "leaf-line.svg" },
+  { name: "Good Vibes", file: "good-vibes.svg" },
 ];
 
 const products: SeedProduct[] = [
@@ -219,6 +215,16 @@ async function main() {
       update: { name: c.name },
       create: c,
     });
+  }
+
+  for (const d of catalogDesigns) {
+    const imageUrl = `/designs/${d.file}`;
+    const existing = await prisma.design.findFirst({ where: { imageUrl, isCatalog: true } });
+    if (existing) {
+      await prisma.design.update({ where: { id: existing.id }, data: { name: d.name } });
+    } else {
+      await prisma.design.create({ data: { name: d.name, imageUrl, isCatalog: true } });
+    }
   }
 
   for (const p of products) {

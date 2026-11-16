@@ -1,4 +1,4 @@
-import ProductSilhouette, { type Shape } from "@/components/product/ProductSilhouette";
+import ProductSilhouette, { ProductShade, type Shape } from "@/components/product/ProductSilhouette";
 import LayerView, { type LayerRender } from "@/components/product/LayerView";
 import type { ViewKey } from "@/components/product/types";
 
@@ -37,6 +37,7 @@ export default function PrintPreview({
           </div>
         </div>
       ))}
+      <ProductShade shape={shape} view={view} />
     </div>
   );
 }

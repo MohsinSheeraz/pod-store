@@ -23,14 +23,13 @@ import {
 import {
   constrainPlacement,
   layerKindAllowed,
-  scaleLimit,
   usableZones,
   zoneRole,
   type LayerMetrics,
 } from "@/lib/placement-rules";
-import ProductSilhouette, { shapeFor } from "@/components/product/ProductSilhouette";
+import ProductSilhouette, { ProductShade, shapeFor } from "@/components/product/ProductSilhouette";
 import ZoneFrame from "@/components/product/ZoneFrame";
-import PlacementControls from "@/components/product/PlacementControls";
+import DesignPicker from "@/components/product/DesignPicker";
 import QtyStepper from "@/components/ui/QtyStepper";
 import type {
   DesignDTO,
@@ -63,9 +62,15 @@ function placementNote(zone: ZoneDTO) {
 const layerIdentity = (layer: Layer | undefined) =>
   layer ? (layer.kind === "image" ? layer.design.id : "text") : "none";
 
-type Props = { product: ProductDTO; loggedIn: boolean };
+type Props = {
+  product: ProductDTO;
+  loggedIn: boolean;
+  // Ready-made designs, and the shopper's own earlier uploads
+  catalog: DesignDTO[];
+  mine: DesignDTO[];
+};
 
-export default function ProductEditor({ product, loggedIn }: Props) {
+export default function ProductEditor({ product, loggedIn, catalog, mine }: Props) {
   // Only offer print areas whose position follows the product's placement rules.
   const zones = useMemo(() => usableZones(product.zones), [product.zones]);
 
@@ -80,10 +85,10 @@ export default function ProductEditor({ product, loggedIn }: Props) {
     );
   }
 
-  return <Customizer product={{ ...product, zones }} loggedIn={loggedIn} />;
+  return <Customizer product={{ ...product, zones }} loggedIn={loggedIn} catalog={catalog} mine={mine} />;
 }
 
-function Customizer({ product, loggedIn }: Props) {
+function Customizer({ product, loggedIn, catalog, mine }: Props) {
   const router = useRouter();
   const zones = product.zones;
 
@@ -101,6 +106,7 @@ function Customizer({ product, loggedIn }: Props) {
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
   const [cartError, setCartError] = useState("");
+  const [uploads, setUploads] = useState<DesignDTO[]>(mine);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
@@ -139,7 +145,6 @@ function Customizer({ product, loggedIn }: Props) {
 
   const activeZone = zones.find((z) => z.key === activeKey) ?? zones[0];
   const activeLayer: Layer | undefined = layers[activeZone.key];
-  const activeMetrics = activeLayer ? metricsMap[activeZone.key] : undefined;
   const printed = zones.filter((z) => layers[z.key]);
   const feeZones = printed.filter((z) => z.fee > 0);
 
@@ -273,6 +278,31 @@ function Customizer({ product, loggedIn }: Props) {
     });
   }
 
+  // Puts a design in a print area, fitted to it. Used for library picks and fresh uploads.
+  async function placeDesign(zoneKey: string, design: DesignDTO) {
+    const zone = zones.find((z) => z.key === zoneKey);
+    if (!zone || !layerKindAllowed(zone, "image")) return;
+    try {
+      const dims = await loadImageSize(design.imageUrl);
+      const aspect = dims.w / dims.h;
+      setLayer(zone.key, {
+        kind: "image",
+        design,
+        aspect,
+        // Vector art (SVG) prints sharp at any size
+        pixelW: design.imageUrl.endsWith(".svg") ? Infinity : dims.w,
+        placement: fitPlacement(zone, aspect),
+      });
+      selectZone(zone.key);
+    } catch {
+      toast.error("Could not load that design. Try another one.");
+    }
+  }
+
+  function pickDesign(design: DesignDTO) {
+    void placeDesign(activeZone.key, design);
+  }
+
   async function uploadFile(file: File, zoneKey: string) {
     const zone = zones.find((z) => z.key === zoneKey);
     if (!zone) return;
@@ -306,17 +336,8 @@ function Customizer({ product, loggedIn }: Props) {
       }
 
       const design: DesignDTO = data.design;
-      const dims = await loadImageSize(design.imageUrl);
-      const aspect = dims.w / dims.h;
-
-      setLayer(zone.key, {
-        kind: "image",
-        design,
-        aspect,
-        pixelW: dims.w,
-        placement: fitPlacement(zone, aspect),
-      });
-      selectZone(zone.key);
+      setUploads((prev) => [design, ...prev.filter((d) => d.id !== design.id)]);
+      await placeDesign(zone.key, design);
     } catch {
       toast.error("Upload failed. Check your connection and try again.");
     } finally {
@@ -343,8 +364,15 @@ function Customizer({ product, loggedIn }: Props) {
 
   function emptyActionFor(z: (typeof zones)[number]) {
     if (z.kind === "TEXT") return { label: "Add text", run: () => focusText(z.key) };
-    if (!loggedIn) return { label: "Log in to upload", run: () => router.push("/login") };
-    return { label: uploading ? "Uploading..." : "Upload", run: () => openPicker(z.key) };
+    return {
+      label: "Choose a design",
+      run: () => {
+        selectZone(z.key);
+        requestAnimationFrame(() =>
+          document.querySelector(".picker")?.scrollIntoView({ behavior: "smooth", block: "center" })
+        );
+      },
+    };
   }
 
   async function addToCart() {
@@ -400,19 +428,34 @@ function Customizer({ product, loggedIn }: Props) {
   }
 
   const lowDpi =
-    activeLayer?.kind === "image"
+    activeLayer?.kind === "image" && Number.isFinite(activeLayer.pixelW)
       ? dpiFor(activeLayer.pixelW, activeLayer.placement.scale, activeZone.widthIn)
       : null;
   const printWidthIn = activeLayer ? activeLayer.placement.scale * activeZone.widthIn : 0;
 
-  const activeLimit =
-    activeLayer && activeMetrics
-      ? scaleLimit(activeMetrics.unit, activeLayer.placement.rotation, activeMetrics.frame)
-      : SCALE_MAX;
-  const sizeLabel =
-    activeLayer?.kind === "image"
-      ? `${printWidthIn.toFixed(1)} in wide`
-      : `${Math.round((activeLayer?.placement.scale ?? 0) * 100)}%`;
+  function centerActive() {
+    updatePlacement(activeZone.key, { x: 0.5, y: 0.5 });
+  }
+
+  function fitActive() {
+    if (!activeLayer) return;
+    updatePlacement(
+      activeZone.key,
+      activeLayer.kind === "image"
+        ? fitPlacement(activeZone, activeLayer.aspect)
+        : { x: 0.5, y: 0.5, scale: fitTextScale(activeZone, activeLayer.text.length) }
+    );
+  }
+
+  function removeActive() {
+    setLayer(activeZone.key, undefined);
+  }
+
+  function clearAll() {
+    setLayers({});
+    setMetricsMap({});
+    setAdded(false);
+  }
 
   const designName = !activeLayer
     ? "None yet"
@@ -446,30 +489,6 @@ function Customizer({ product, loggedIn }: Props) {
           </div>
         </div>
 
-        {views.length > 1 && (
-          <div className="view-tabs" role="group" aria-label="Product view">
-            {views.map((v) => (
-              <button
-                key={v}
-                type="button"
-                className="chip"
-                aria-pressed={v === view}
-                onClick={() => changeView(v)}
-              >
-                {v === "front" ? "Front" : "Back"}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {isApparel && (
-          <p className="orientation-note">
-            {view === "front"
-              ? "Front view. The garment’s left side is on your right."
-              : "Back view. The garment’s left side is on your left."}
-          </p>
-        )}
-
         <div
           className="editor-stage"
           onDragOver={(e) => {
@@ -483,6 +502,28 @@ function Customizer({ product, loggedIn }: Props) {
           }}
           aria-busy={uploading}
         >
+          {views.length > 1 && (
+            <div className="view-tabs stage-views" role="group" aria-label="Product view">
+              {views.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  className="chip"
+                  aria-pressed={v === view}
+                  onClick={() => changeView(v)}
+                >
+                  {v === "front" ? "Front" : "Back"}
+                </button>
+              ))}
+            </div>
+          )}
+          {isApparel && (
+            <p className="orientation-note stage-note">
+              {view === "front"
+                ? "Front view. The garment’s left side is on your right."
+                : "Back view. The garment’s left side is on your left."}
+            </p>
+          )}
           <ProductSilhouette shape={shape} view={view} fill={colorHex} />
           {zones
             .filter((z) => z.view === view)
@@ -512,6 +553,7 @@ function Customizer({ product, loggedIn }: Props) {
                 }
               />
             ))}
+          <ProductShade shape={shape} view={view} />
         </div>
 
         <p className="visually-hidden" role="status" aria-live="polite">
@@ -519,64 +561,40 @@ function Customizer({ product, loggedIn }: Props) {
         </p>
 
         {activeLayer ? (
-          <>
-            <div className="stage-toolbar">
-              <div className="stage-readout">
-                {activeLayer.kind === "image" && lowDpi !== null ? (
-                  <p className={lowDpi < MIN_DPI ? "warn" : "hint"}>
-                    {lowDpi < MIN_DPI
-                      ? `Low resolution: about ${Math.round(lowDpi)} DPI at ${printWidthIn.toFixed(1)} in wide. It may print blurry.`
-                      : `Prints about ${printWidthIn.toFixed(1)} in wide at ${Math.round(lowDpi)} DPI.`}
-                  </p>
-                ) : (
-                  <p className="hint">{activeZone.label}</p>
-                )}
-                <p className="hint">Designs stay inside the print area, so nothing gets cut off.</p>
-              </div>
-              <div className="art-actions">
-                {activeLayer.kind === "image" && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() =>
-                      updatePlacement(activeZone.key, fitPlacement(activeZone, activeLayer.aspect))
-                    }
-                  >
-                    Fit to area
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setLayer(activeZone.key, undefined)}
-                >
-                  Remove
-                </button>
-              </div>
+          <div className="stage-toolbar">
+            <div className="stage-readout">
+              {activeLayer.kind === "image" && lowDpi !== null ? (
+                <p className={lowDpi < MIN_DPI ? "warn" : "hint"}>
+                  {lowDpi < MIN_DPI
+                    ? `Low resolution: about ${Math.round(lowDpi)} DPI at ${printWidthIn.toFixed(1)} in wide. It may print blurry.`
+                    : `Prints about ${printWidthIn.toFixed(1)} in wide at ${Math.round(lowDpi)} DPI.`}
+                </p>
+              ) : activeLayer.kind === "image" ? (
+                <p className="hint">Vector art: prints sharp at this size ({printWidthIn.toFixed(1)} in wide).</p>
+              ) : (
+                <p className="hint">{activeZone.label}</p>
+              )}
+              <p className="hint">Drag to move, drag a corner to resize. It stays inside the print area.</p>
             </div>
-
-            <PlacementControls
-              label={activeZone.label}
-              placement={activeLayer.placement}
-              maxScale={activeLimit}
-              sizeLabel={sizeLabel}
-              onChange={(patch) => updatePlacement(activeZone.key, patch)}
-              onCenter={() => updatePlacement(activeZone.key, { x: 0.5, y: 0.5 })}
-            />
-          </>
+            <div className="art-actions">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={centerActive}>
+                Center
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={fitActive}>
+                Fit to area
+              </button>
+              <button type="button" className="btn btn-danger btn-sm" onClick={removeActive}>
+                Remove design
+              </button>
+            </div>
+          </div>
         ) : (
           <p className="stage-hint">
             {activeZone.kind === "TEXT"
               ? "Type your initials in the panel. A monogram prints on the left chest only."
-              : "Click the highlighted print area, then upload or drop an image on it."}
+              : "Pick a ready-made design or upload your own. It lands on the highlighted print area."}
           </p>
         )}
-
-        <p className="stage-hint">
-          Drag to move, drag a corner to resize and the round handle to rotate. Arrow keys nudge,
-          Shift snaps rotation to 15°, Alt turns snapping off, Ctrl + scroll resizes, Delete
-          removes. The controls below do the same without dragging.
-        </p>
       </div>
 
       <div className="editor-panel">
@@ -628,7 +646,9 @@ function Customizer({ product, loggedIn }: Props) {
         )}
 
         <div className="control-group">
-          <span className="control-label">Print areas</span>
+          <span className="control-label">
+            Where to print <span>{printed.length} of {zones.length} used</span>
+          </span>
           <div className="zone-list" role="group" aria-label="Print areas">
             {zones.map((z) => (
               <button
@@ -640,7 +660,7 @@ function Customizer({ product, loggedIn }: Props) {
               >
                 <span>{z.label}</span>
                 <span className="zone-fee">
-                  {z.kind === "TEXT" ? "Text · " : ""}
+                  {layers[z.key] ? "Design added · " : z.kind === "TEXT" ? "Text · " : ""}
                   {z.fee > 0 ? `+${formatMoney(z.fee)}` : "Included"}
                 </span>
               </button>
@@ -651,34 +671,20 @@ function Customizer({ product, loggedIn }: Props) {
 
         <div className="control-group">
           <span className="control-label">
-            {activeZone.label} <span>{activeZone.kind === "TEXT" ? "Text" : "Artwork"}</span>
+            {activeZone.label} <span>{activeZone.kind === "TEXT" ? "Monogram" : "Design"}</span>
           </span>
 
-          {activeZone.kind === "IMAGE" &&
-            (loggedIn ? (
-              <div className="upload-row">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={uploading}
-                  onClick={() => openPicker(activeZone.key)}
-                >
-                  {uploading
-                    ? "Uploading..."
-                    : activeLayer
-                      ? "Replace artwork"
-                      : "Upload artwork"}
-                </button>
-                {activeLayer?.kind === "image" && (
-                  <span className="upload-name">{activeLayer.design.name}</span>
-                )}
-              </div>
-            ) : (
-              <p className="login-note">
-                <Link href="/login">Log in</Link> or{" "}
-                <Link href="/signup">create an account</Link> to upload your artwork.
-              </p>
-            ))}
+          {activeZone.kind === "IMAGE" && (
+            <DesignPicker
+              catalog={catalog}
+              mine={uploads}
+              selectedId={activeLayer?.kind === "image" ? activeLayer.design.id : null}
+              loggedIn={loggedIn}
+              uploading={uploading}
+              onPick={pickDesign}
+              onUpload={() => openPicker(activeZone.key)}
+            />
+          )}
 
           {activeZone.kind === "TEXT" && (
             <>
@@ -723,6 +729,17 @@ function Customizer({ product, loggedIn }: Props) {
                 </>
               )}
             </>
+          )}
+
+          {activeLayer && (
+            <button type="button" className="btn btn-danger btn-sm remove-design" onClick={removeActive}>
+              Remove {activeLayer.kind === "text" ? "monogram" : "design"} from {activeZone.label}
+            </button>
+          )}
+          {printed.length > 1 && (
+            <button type="button" className="link-btn" onClick={clearAll}>
+              Clear all designs
+            </button>
           )}
 
           <input

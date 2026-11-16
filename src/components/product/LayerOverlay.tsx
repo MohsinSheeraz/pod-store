@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   clamp,
   extents,
-  normalizeAngle,
   snapAxis,
   SCALE_MAX,
   SCALE_MIN,
@@ -27,25 +26,10 @@ type Gesture =
       startDist: number;
       cx: number;
       cy: number;
-    }
-  | {
-      type: "rotate";
-      startRotation: number;
-      startAngle: number;
-      cx: number;
-      cy: number;
     };
 
 const SNAP = 0.025;
 const CORNERS = ["nw", "ne", "sw", "se"] as const;
-
-// Free rotation, with a gentle pull to 45° steps. Shift locks to 15°, Alt turns it off.
-function snapRotation(deg: number, e: { shiftKey: boolean; altKey: boolean }) {
-  if (e.altKey) return deg;
-  if (e.shiftKey) return Math.round(deg / 15) * 15;
-  const nearest = Math.round(deg / 45) * 45;
-  return Math.abs(deg - nearest) <= 4 ? nearest : deg;
-}
 
 type Props = {
   placement: Placement;
@@ -78,15 +62,12 @@ export default function LayerOverlay({
   const latest = useRef({ placement, onChange });
   // The readout is derived from the placement the editor actually kept, so it stays
   // correct when a resize is capped at the print area's edge.
-  const [hudMode, setHudMode] = useState<"resize" | "rotate" | null>(null);
-  const hud =
-    hudMode === "resize"
-      ? widthIn
-        ? `${(placement.scale * widthIn).toFixed(1)} in wide`
-        : `${Math.round(placement.scale * 100)}%`
-      : hudMode === "rotate"
-        ? `${Math.round(placement.rotation)}°`
-        : null;
+  const [resizing, setResizing] = useState(false);
+  const hud = resizing
+    ? widthIn
+      ? `${(placement.scale * widthIn).toFixed(1)} in wide`
+      : `${Math.round(placement.scale * 100)}%`
+    : null;
 
   useEffect(() => {
     latest.current = { placement, onChange };
@@ -161,20 +142,6 @@ export default function LayerOverlay({
     });
   }
 
-  function startRotate(e: React.PointerEvent<HTMLElement>) {
-    if (e.button !== 0) return;
-    const c = center();
-    if (!c) return;
-    begin(e, {
-      type: "rotate",
-      startRotation: placement.rotation,
-      startAngle:
-        (Math.atan2(e.clientY - c.cy, e.clientX - c.cx) * 180) / Math.PI,
-      cx: c.cx,
-      cy: c.cy,
-    });
-  }
-
   function onMove(e: React.PointerEvent<HTMLElement>) {
     const g = gesture.current;
     if (!g) return;
@@ -212,24 +179,14 @@ export default function LayerOverlay({
         SCALE_MAX,
       );
       change({ ...p, scale });
-      setHudMode("resize");
-    }
-
-    if (g.type === "rotate") {
-      const angle =
-        (Math.atan2(e.clientY - g.cy, e.clientX - g.cx) * 180) / Math.PI;
-      const rotation = normalizeAngle(
-        snapRotation(g.startRotation + (angle - g.startAngle), e),
-      );
-      change({ ...p, rotation });
-      setHudMode("rotate");
+      setResizing(true);
     }
   }
 
   function end() {
     if (!gesture.current) return;
     gesture.current = null;
-    setHudMode(null);
+    setResizing(false);
     onGuides({ x: null, y: null });
   }
 
@@ -263,7 +220,7 @@ export default function LayerOverlay({
         className={selected ? "overlay-box is-selected" : "overlay-box"}
         role="group"
         tabIndex={selected ? 0 : -1}
-        aria-label={`${label}. Arrow keys move it, Delete removes it.`}
+        aria-label={`${label}. Drag to move. Arrow keys nudge it, Delete removes it.`}
         style={{
           left: `${placement.x * 100}%`,
           top: `${placement.y * 100}%`,
@@ -279,13 +236,19 @@ export default function LayerOverlay({
       >
         {selected && (
           <>
-            <span className="rotate-stem" aria-hidden="true" />
-            <span
-              className="handle handle-rotate"
-              title="Drag to rotate. Shift snaps to 15°."
-              aria-hidden="true"
-              onPointerDown={startRotate}
-            />
+            <button
+              type="button"
+              className="layer-remove"
+              aria-label={`Remove design from ${label}`}
+              title="Remove design"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+            >
+              ×
+            </button>
             {CORNERS.map((c) => (
               <span
                 key={c}

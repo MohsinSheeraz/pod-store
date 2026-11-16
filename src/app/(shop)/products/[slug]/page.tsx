@@ -5,7 +5,7 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import ProductEditor from "@/components/product/ProductEditor";
-import type { ProductDTO } from "@/components/product/types";
+import type { DesignDTO, ProductDTO } from "@/components/product/types";
 
 const getProduct = cache((slug: string) =>
   prisma.product.findFirst({
@@ -35,6 +35,24 @@ export default async function ProductPage({
 }) {
   const { slug } = await params;
   const [product, session] = await Promise.all([getProduct(slug), auth()]);
+  const userId = session?.user?.id;
+
+  const toDesign = (d: { id: string; name: string; imageUrl: string }): DesignDTO => ({
+    id: d.id,
+    name: d.name,
+    imageUrl: d.imageUrl,
+  });
+  // Ready-made catalog art, plus whatever this shopper uploaded before.
+  const [catalog, mine] = await Promise.all([
+    prisma.design.findMany({ where: { isCatalog: true }, orderBy: { createdAt: "asc" }, take: 48 }),
+    userId
+      ? prisma.design.findMany({
+          where: { ownerId: userId, isCatalog: false },
+          orderBy: { createdAt: "desc" },
+          take: 24,
+        })
+      : Promise.resolve([]),
+  ]);
 
   if (!product || product.variants.length === 0 || product.zones.length === 0) {
     notFound();
@@ -76,7 +94,12 @@ export default async function ProductPage({
       <Link href="/#products" className="back-link">
         Back to products
       </Link>
-      <ProductEditor product={dto} loggedIn={!!session?.user} />
+      <ProductEditor
+        product={dto}
+        loggedIn={!!session?.user}
+        catalog={catalog.map(toDesign)}
+        mine={mine.map(toDesign)}
+      />
     </div>
   );
 }
