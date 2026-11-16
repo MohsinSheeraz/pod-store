@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { zoneProblem } from "@/lib/placement-rules";
 
 export const cartInclude = {
   items: {
@@ -45,6 +46,10 @@ export function blockedReason(item: CartLine): string | null {
     const missing = p.zone.kind === "TEXT" ? !p.text : !p.design;
     if (missing) {
       return `${product.name}: the ${p.zone.label} print is missing its artwork. Remove it from your cart.`;
+    }
+    const problem = zoneProblem(p.zone);
+    if (problem) {
+      return `${product.name}: ${problem} Remove it from your cart.`;
     }
   }
   return null;

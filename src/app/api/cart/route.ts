@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
+import { open } from "fs/promises";
+import path from "path";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { TEXT_MAX_LENGTH } from "@/lib/placement";
+import { validatePlacement, type LayerSpec } from "@/lib/placement-rules";
+import { readImageSize } from "@/lib/image-size";
 
 const FONTS = ["sans", "display", "serif"];
 const HEX = /^#[0-9a-fA-F]{6}$/;
+const PUBLIC_DIR = path.join(process.cwd(), "public");
 
 const inRange = (n: unknown, min: number, max: number) =>
   typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
@@ -19,6 +24,26 @@ const validPlacement = (p: unknown) => {
     inRange(pl.rotation, -180, 180)
   );
 };
+
+// Width / height of a design file, or null when it can't be read. Only files under
+// /public are read; anything else (external catalog art) skips the height check.
+async function designAspect(imageUrl: string): Promise<number | null> {
+  if (!imageUrl.startsWith("/")) return null;
+  const file = path.join(PUBLIC_DIR, imageUrl);
+  if (!file.startsWith(PUBLIC_DIR + path.sep)) return null;
+  try {
+    const handle = await open(file, "r");
+    try {
+      const { buffer, bytesRead } = await handle.read(Buffer.alloc(256 * 1024), 0, 256 * 1024, 0);
+      const size = readImageSize(buffer.subarray(0, bytesRead));
+      return size ? size.width / size.height : null;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
+}
 
 type PrintInput = {
   zoneId?: unknown;
@@ -88,6 +113,9 @@ export async function POST(req: Request) {
     const placement = { x: p.x, y: p.y, scale: p.scale, rotation: p.rotation };
 
     if (zone.kind === "TEXT") {
+      if (raw.designId !== undefined) {
+        return NextResponse.json({ error: `${zone.label} takes text, not artwork.` }, { status: 400 });
+      }
       const text = typeof raw.text === "string" ? raw.text.trim() : "";
       if (!text || text.length > TEXT_MAX_LENGTH) {
         return NextResponse.json(
@@ -101,14 +129,30 @@ export async function POST(req: Request) {
       if (typeof raw.color !== "string" || !HEX.test(raw.color)) {
         return NextResponse.json({ error: "Invalid text color." }, { status: 400 });
       }
+
+      // Monograms: only in the left-chest zone, and fully inside it.
+      const spec: LayerSpec = { kind: "text", chars: text.length };
+      const placementError = validatePlacement(zone, spec, placement);
+      if (placementError) {
+        return NextResponse.json({ error: placementError }, { status: 400 });
+      }
       data.push({ zoneId: zone.id, text, font: raw.font, color: raw.color, placement });
     } else {
+      if (raw.text !== undefined) {
+        return NextResponse.json({ error: `${zone.label} takes artwork, not text.` }, { status: 400 });
+      }
       if (typeof raw.designId !== "string") {
         return NextResponse.json({ error: "Add artwork to this print area." }, { status: 400 });
       }
       const design = await prisma.design.findUnique({ where: { id: raw.designId } });
       if (!design || (!design.isCatalog && design.ownerId !== session.user.id)) {
         return NextResponse.json({ error: "Artwork not found." }, { status: 404 });
+      }
+
+      const spec: LayerSpec = { kind: "image", aspect: await designAspect(design.imageUrl) };
+      const placementError = validatePlacement(zone, spec, placement);
+      if (placementError) {
+        return NextResponse.json({ error: placementError }, { status: 400 });
       }
       data.push({ zoneId: zone.id, designId: design.id, placement });
     }

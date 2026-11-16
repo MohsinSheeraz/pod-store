@@ -45,19 +45,35 @@ const tshirtSizes = [
 
 // Fees: back +4, sleeve +2.50, monogram +3. Change them here.
 const teeZones: SeedZone[] = [
-  { key: "front", label: "Front", view: "front", x: 28, y: 25, w: 44, h: 42, widthIn: 12, heightIn: 14 },
-  { key: "back", label: "Back", view: "back", x: 27, y: 22, w: 46, h: 46, widthIn: 12, heightIn: 14, fee: 4 },
-  { key: "right-sleeve", label: "Right sleeve", view: "front", x: 8.5, y: 22, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
-  { key: "left-sleeve", label: "Left sleeve", view: "front", x: 82.5, y: 22, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
-  { key: "monogram", label: "Monogram", view: "front", kind: "TEXT", x: 40, y: 76, w: 20, h: 8, widthIn: 3.5, heightIn: 1.5, fee: 3 },
+  {
+    key: "monogram",
+    label: "Left chest monogram",
+    view: "front",
+    kind: "TEXT",
+    x: 54,
+    y: 22,
+    w: 14,
+    h: 13,
+    widthIn: 3.5,
+    heightIn: 3.4,
+    fee: 3,
+  },
 ];
 
 const hoodieZones: SeedZone[] = [
-  { key: "front", label: "Front", view: "front", x: 30, y: 38, w: 40, h: 32, widthIn: 11, heightIn: 12 },
-  { key: "back", label: "Back", view: "back", x: 28, y: 26, w: 44, h: 46, widthIn: 12, heightIn: 14, fee: 4.5 },
-  { key: "right-sleeve", label: "Right sleeve", view: "front", x: 10.5, y: 27, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
-  { key: "left-sleeve", label: "Left sleeve", view: "front", x: 80.5, y: 27, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
-  { key: "monogram", label: "Monogram", view: "front", kind: "TEXT", x: 42, y: 72, w: 16, h: 6, widthIn: 3, heightIn: 1.2, fee: 3 },
+  {
+    key: "monogram",
+    label: "Left chest monogram",
+    view: "front",
+    kind: "TEXT",
+    x: 55,
+    y: 28,
+    w: 13,
+    h: 12,
+    widthIn: 3.2,
+    heightIn: 3.3,
+    fee: 3,
+  },
 ];
 
 const products: SeedProduct[] = [
@@ -101,7 +117,17 @@ const products: SeedProduct[] = [
     basePrice: 14,
     category: "drinkware",
     zones: [
-      { key: "side", label: "Print area", view: "front", x: 30, y: 33, w: 40, h: 38, widthIn: 4, heightIn: 3.5 },
+      {
+        key: "side",
+        label: "Print area",
+        view: "front",
+        x: 30,
+        y: 33,
+        w: 40,
+        h: 38,
+        widthIn: 4,
+        heightIn: 3.5,
+      },
     ],
     colors: [{ name: "White", hex: "#FFFFFF" }],
     sizes: [{ name: "11 oz", delta: 0 }],
@@ -114,8 +140,29 @@ const products: SeedProduct[] = [
     basePrice: 18,
     category: "bags",
     zones: [
-      { key: "front", label: "Front", view: "front", x: 28, y: 45, w: 44, h: 38, widthIn: 11, heightIn: 11 },
-      { key: "back", label: "Back", view: "back", x: 28, y: 45, w: 44, h: 38, widthIn: 11, heightIn: 11, fee: 3 },
+      {
+        key: "front",
+        label: "Front",
+        view: "front",
+        x: 28,
+        y: 45,
+        w: 44,
+        h: 38,
+        widthIn: 11,
+        heightIn: 11,
+      },
+      {
+        key: "back",
+        label: "Back",
+        view: "back",
+        x: 28,
+        y: 45,
+        w: 44,
+        h: 38,
+        widthIn: 11,
+        heightIn: 11,
+        fee: 3,
+      },
     ],
     colors: [
       { name: "Natural", hex: "#E6DCC8" },
@@ -131,7 +178,17 @@ const products: SeedProduct[] = [
     basePrice: 16,
     category: "wall-art",
     zones: [
-      { key: "poster", label: "Poster", view: "front", x: 15, y: 7, w: 70, h: 86, widthIn: 18, heightIn: 23 },
+      {
+        key: "poster",
+        label: "Poster",
+        view: "front",
+        x: 15,
+        y: 7,
+        w: 70,
+        h: 86,
+        widthIn: 18,
+        heightIn: 23,
+      },
     ],
     colors: [{ name: "White", hex: "#FFFFFF" }],
     sizes: [
@@ -148,15 +205,26 @@ async function main() {
   await prisma.user.upsert({
     where: { email: "admin@pressroom.test" },
     update: {},
-    create: { name: "Admin", email: "admin@pressroom.test", password: hashed, role: "ADMIN" },
+    create: {
+      name: "Admin",
+      email: "admin@pressroom.test",
+      password: hashed,
+      role: "ADMIN",
+    },
   });
 
   for (const c of categories) {
-    await prisma.category.upsert({ where: { slug: c.slug }, update: { name: c.name }, create: c });
+    await prisma.category.upsert({
+      where: { slug: c.slug },
+      update: { name: c.name },
+      create: c,
+    });
   }
 
   for (const p of products) {
-    const category = await prisma.category.findUniqueOrThrow({ where: { slug: p.category } });
+    const category = await prisma.category.findUniqueOrThrow({
+      where: { slug: p.category },
+    });
 
     const product = await prisma.product.upsert({
       where: { slug: p.slug },
@@ -201,7 +269,11 @@ async function main() {
       for (const size of p.sizes) {
         await prisma.productVariant.upsert({
           where: {
-            productId_color_size: { productId: product.id, color: color.name, size: size.name },
+            productId_color_size: {
+              productId: product.id,
+              color: color.name,
+              size: size.name,
+            },
           },
           update: { colorHex: color.hex, priceDelta: size.delta },
           create: {

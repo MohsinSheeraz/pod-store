@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -13,13 +13,24 @@ import {
   isDark,
   MIN_DPI,
   NO_GUIDES,
+  SCALE_MAX,
+  SCALE_MIN,
   TEXT_COLORS,
   TEXT_FONTS,
   TEXT_MAX_LENGTH,
   type Guides,
 } from "@/lib/placement";
+import {
+  constrainPlacement,
+  layerKindAllowed,
+  scaleLimit,
+  usableZones,
+  zoneRole,
+  type LayerMetrics,
+} from "@/lib/placement-rules";
 import ProductSilhouette, { shapeFor } from "@/components/product/ProductSilhouette";
 import ZoneFrame from "@/components/product/ZoneFrame";
+import PlacementControls from "@/components/product/PlacementControls";
 import QtyStepper from "@/components/ui/QtyStepper";
 import type {
   DesignDTO,
@@ -28,6 +39,7 @@ import type {
   Placement,
   ProductDTO,
   ViewKey,
+  ZoneDTO,
 } from "@/components/product/types";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -42,13 +54,36 @@ function loadImageSize(src: string) {
   });
 }
 
-export default function ProductEditor({
-  product,
-  loggedIn,
-}: {
-  product: ProductDTO;
-  loggedIn: boolean;
-}) {
+function placementNote(zone: ZoneDTO) {
+  return zoneRole(zone) === "left-chest"
+    ? "Text only. Prints on the wearer’s left chest, which is on your right when you look at the front."
+    : `${zone.widthIn} × ${zone.heightIn} in print area`;
+}
+
+const layerIdentity = (layer: Layer | undefined) =>
+  layer ? (layer.kind === "image" ? layer.design.id : "text") : "none";
+
+type Props = { product: ProductDTO; loggedIn: boolean };
+
+export default function ProductEditor({ product, loggedIn }: Props) {
+  // Only offer print areas whose position follows the product's placement rules.
+  const zones = useMemo(() => usableZones(product.zones), [product.zones]);
+
+  if (zones.length === 0) {
+    return (
+      <div className="editor-alert" role="alert">
+        <p>This product can’t be customized right now. Please check back soon.</p>
+        <Link href="/#products" className="btn btn-ghost btn-sm">
+          Back to products
+        </Link>
+      </div>
+    );
+  }
+
+  return <Customizer product={{ ...product, zones }} loggedIn={loggedIn} />;
+}
+
+function Customizer({ product, loggedIn }: Props) {
   const router = useRouter();
   const zones = product.zones;
 
@@ -58,13 +93,14 @@ export default function ProductEditor({
   const [quantity, setQuantity] = useState(1);
 
   const [layers, setLayers] = useState<Record<string, Layer>>({});
+  const [metricsMap, setMetricsMap] = useState<Record<string, LayerMetrics>>({});
   const [activeKey, setActiveKey] = useState(zones[0].key);
   const [view, setView] = useState<ViewKey>(zones[0].view);
   const [guides, setGuides] = useState<Guides>(NO_GUIDES);
-  const [outside, setOutside] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
+  const [cartError, setCartError] = useState("");
 
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
@@ -81,6 +117,20 @@ export default function ProductEditor({
 
   const views = useMemo(() => [...new Set(zones.map((z) => z.view))], [zones]);
 
+  // Smaller print areas stack above larger ones they overlap (e.g. left chest over front).
+  const stack = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const v of views) {
+      zones
+        .filter((z) => z.view === v)
+        .sort((a, b) => b.w * b.h - a.w * a.h)
+        .forEach((z, i) => {
+          map[z.key] = i + 1;
+        });
+    }
+    return map;
+  }, [zones, views]);
+
   const sizes = product.variants.filter((v) => v.color === color);
   const variant = product.variants.find((v) => v.color === color && v.size === size);
   const colorHex = colors.find((c) => c.name === color)?.hex ?? "#ffffff";
@@ -89,6 +139,7 @@ export default function ProductEditor({
 
   const activeZone = zones.find((z) => z.key === activeKey) ?? zones[0];
   const activeLayer: Layer | undefined = layers[activeZone.key];
+  const activeMetrics = activeLayer ? metricsMap[activeZone.key] : undefined;
   const printed = zones.filter((z) => layers[z.key]);
   const feeZones = printed.filter((z) => z.fee > 0);
 
@@ -130,19 +181,61 @@ export default function ProductEditor({
       else delete next[key];
       return next;
     });
+    // The old layer's measurements no longer apply.
+    setMetricsMap((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setAdded(false);
   }
 
+  // Every placement change goes through here, so a layer can never leave its zone.
   function updatePlacement(key: string, patch: Partial<Placement>) {
     setLayers((prev) => {
       const cur = prev[key];
       if (!cur) return prev;
-      return { ...prev, [key]: { ...cur, placement: { ...cur.placement, ...patch } } };
+      const merged = { ...cur.placement, ...patch };
+      const m = metricsMap[key];
+      const placement = m
+        ? constrainPlacement(merged, m.unit, m.frame)
+        : {
+            ...merged,
+            x: clamp(merged.x, 0, 1),
+            y: clamp(merged.y, 0, 1),
+            scale: clamp(merged.scale, SCALE_MIN, SCALE_MAX),
+          };
+      return { ...prev, [key]: { ...cur, placement } };
     });
+    setAdded(false);
   }
+
+  // The zone reports what it measured (after text edits, resizes, window changes). Keep the
+  // numbers and pull the layer back inside if the new size no longer fits.
+  const handleMetrics = useCallback((key: string, m: LayerMetrics) => {
+    setMetricsMap((prev) => {
+      const cur = prev[key];
+      const same =
+        cur &&
+        Math.abs(cur.unit.w - m.unit.w) < 0.5 &&
+        Math.abs(cur.unit.h - m.unit.h) < 0.5 &&
+        Math.abs(cur.frame.w - m.frame.w) < 0.5 &&
+        Math.abs(cur.frame.h - m.frame.h) < 0.5;
+      return same ? prev : { ...prev, [key]: m };
+    });
+    setLayers((prev) => {
+      const cur = prev[key];
+      if (!cur) return prev;
+      const next = constrainPlacement(cur.placement, m.unit, m.frame);
+      return next === cur.placement ? prev : { ...prev, [key]: { ...cur, placement: next } };
+    });
+  }, []);
 
   function setText(value: string) {
     const key = activeZone.key;
     const text = value.slice(0, TEXT_MAX_LENGTH);
+    setAdded(false);
     if (!text.trim()) {
       setLayer(key, undefined);
       return;
@@ -172,6 +265,7 @@ export default function ProductEditor({
 
   function patchText(patch: { font?: FontKey; color?: string }) {
     const key = activeZone.key;
+    setAdded(false);
     setLayers((prev) => {
       const cur = prev[key];
       if (cur?.kind !== "text") return prev;
@@ -182,7 +276,7 @@ export default function ProductEditor({
   async function uploadFile(file: File, zoneKey: string) {
     const zone = zones.find((z) => z.key === zoneKey);
     if (!zone) return;
-    if (zone.kind !== "IMAGE") {
+    if (!layerKindAllowed(zone, "image")) {
       toast.error("This print area takes text, not artwork.");
       return;
     }
@@ -266,6 +360,7 @@ export default function ProductEditor({
 
     setAdding(true);
     setAdded(false);
+    setCartError("");
     try {
       const res = await fetch("/api/cart", {
         method: "POST",
@@ -287,17 +382,18 @@ export default function ProductEditor({
           }),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        toast.error(data.error || "Something went wrong.");
+        // Everything the shopper made stays on screen so they can fix it and retry.
+        setCartError(data.error || "Something went wrong. Your design is still here.");
         return;
       }
 
       setAdded(true);
       router.refresh();
     } catch {
-      toast.error("Could not reach the server. Try again.");
+      setCartError("Could not reach the server. Your design is still here. Try again.");
     } finally {
       setAdding(false);
     }
@@ -309,9 +405,47 @@ export default function ProductEditor({
       : null;
   const printWidthIn = activeLayer ? activeLayer.placement.scale * activeZone.widthIn : 0;
 
+  const activeLimit =
+    activeLayer && activeMetrics
+      ? scaleLimit(activeMetrics.unit, activeLayer.placement.rotation, activeMetrics.frame)
+      : SCALE_MAX;
+  const sizeLabel =
+    activeLayer?.kind === "image"
+      ? `${printWidthIn.toFixed(1)} in wide`
+      : `${Math.round((activeLayer?.placement.scale ?? 0) * 100)}%`;
+
+  const designName = !activeLayer
+    ? "None yet"
+    : activeLayer.kind === "image"
+      ? activeLayer.design.name
+      : `“${activeLayer.text}”`;
+
+  const isApparel = shape === "tee" || shape === "hoodie";
+
   return (
     <div className="editor">
       <div className="editor-preview">
+        <div className="editor-context" aria-label="Current selection">
+          <div>
+            <span>Product</span>
+            <strong>{product.name}</strong>
+            <small>
+              {color}
+              {size !== "One size" ? ` · ${size}` : ""}
+            </small>
+          </div>
+          <div>
+            <span>Design</span>
+            <strong>{designName}</strong>
+            <small>{activeLayer ? "On the mockup" : "Add one below"}</small>
+          </div>
+          <div>
+            <span>Placement</span>
+            <strong>{activeZone.label}</strong>
+            <small>{activeZone.fee > 0 ? `+${formatMoney(activeZone.fee)}` : "Included"}</small>
+          </div>
+        </div>
+
         {views.length > 1 && (
           <div className="view-tabs" role="group" aria-label="Product view">
             {views.map((v) => (
@@ -328,6 +462,14 @@ export default function ProductEditor({
           </div>
         )}
 
+        {isApparel && (
+          <p className="orientation-note">
+            {view === "front"
+              ? "Front view. The garment’s left side is on your right."
+              : "Back view. The garment’s left side is on your left."}
+          </p>
+        )}
+
         <div
           className="editor-stage"
           onDragOver={(e) => {
@@ -339,26 +481,29 @@ export default function ProductEditor({
             e.preventDefault();
             void uploadFile(file, activeZone.key);
           }}
+          aria-busy={uploading}
         >
           <ProductSilhouette shape={shape} view={view} fill={colorHex} />
           {zones
             .filter((z) => z.view === view)
             .map((z) => (
               <ZoneFrame
-                key={z.key}
+                // Remount when the layer's identity changes so measurements are never stale.
+                key={`${z.key}:${layerIdentity(layers[z.key])}`}
                 zone={z}
                 layer={layers[z.key]}
                 active={z.key === activeZone.key}
                 dark={dark}
                 guides={z.key === activeZone.key ? guides : NO_GUIDES}
+                stack={stack[z.key] ?? 1}
                 emptyAction={emptyActionFor(z)}
                 onSelect={() => selectZone(z.key)}
                 onChange={(p) => updatePlacement(z.key, p)}
                 onGuides={setGuides}
-                onOutside={setOutside}
+                onMetrics={handleMetrics}
                 onRemove={() => setLayer(z.key, undefined)}
                 onDropFile={
-                  z.kind === "IMAGE"
+                  layerKindAllowed(z, "image")
                     ? (file) => {
                         selectZone(z.key);
                         void uploadFile(file, z.key);
@@ -369,52 +514,68 @@ export default function ProductEditor({
             ))}
         </div>
 
+        <p className="visually-hidden" role="status" aria-live="polite">
+          {uploading ? "Uploading artwork" : ""}
+        </p>
+
         {activeLayer ? (
-          <div className="stage-toolbar">
-            <div className="stage-readout">
-              {activeLayer.kind === "image" && lowDpi !== null ? (
-                <p className={lowDpi < MIN_DPI ? "warn" : "hint"}>
-                  {lowDpi < MIN_DPI
-                    ? `Low resolution: about ${Math.round(lowDpi)} DPI at ${printWidthIn.toFixed(1)} in wide. It may print blurry.`
-                    : `Prints about ${printWidthIn.toFixed(1)} in wide at ${Math.round(lowDpi)} DPI.`}
-                </p>
-              ) : (
-                <p className="hint">{activeZone.label}</p>
-              )}
-              {outside && (
-                <p className="warn">Part of this is outside the print area and will be cut off.</p>
-              )}
-            </div>
-            <div className="art-actions">
-              {activeLayer.kind === "image" && (
+          <>
+            <div className="stage-toolbar">
+              <div className="stage-readout">
+                {activeLayer.kind === "image" && lowDpi !== null ? (
+                  <p className={lowDpi < MIN_DPI ? "warn" : "hint"}>
+                    {lowDpi < MIN_DPI
+                      ? `Low resolution: about ${Math.round(lowDpi)} DPI at ${printWidthIn.toFixed(1)} in wide. It may print blurry.`
+                      : `Prints about ${printWidthIn.toFixed(1)} in wide at ${Math.round(lowDpi)} DPI.`}
+                  </p>
+                ) : (
+                  <p className="hint">{activeZone.label}</p>
+                )}
+                <p className="hint">Designs stay inside the print area, so nothing gets cut off.</p>
+              </div>
+              <div className="art-actions">
+                {activeLayer.kind === "image" && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() =>
+                      updatePlacement(activeZone.key, fitPlacement(activeZone, activeLayer.aspect))
+                    }
+                  >
+                    Fit to area
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  onClick={() =>
-                    updatePlacement(activeZone.key, fitPlacement(activeZone, activeLayer.aspect))
-                  }
+                  onClick={() => setLayer(activeZone.key, undefined)}
                 >
-                  Fit to area
+                  Remove
                 </button>
-              )}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setLayer(activeZone.key, undefined)}
-              >
-                Remove
-              </button>
+              </div>
             </div>
-          </div>
+
+            <PlacementControls
+              label={activeZone.label}
+              placement={activeLayer.placement}
+              maxScale={activeLimit}
+              sizeLabel={sizeLabel}
+              onChange={(patch) => updatePlacement(activeZone.key, patch)}
+              onCenter={() => updatePlacement(activeZone.key, { x: 0.5, y: 0.5 })}
+            />
+          </>
         ) : (
           <p className="stage-hint">
-            Click a dashed print area, then upload or drop an image on it.
+            {activeZone.kind === "TEXT"
+              ? "Type your initials in the panel. A monogram prints on the left chest only."
+              : "Click the highlighted print area, then upload or drop an image on it."}
           </p>
         )}
 
         <p className="stage-hint">
-          Drag to move. Drag a corner to resize and the round handle to rotate. Shift snaps
-          rotation to 15°, Alt turns snapping off, Ctrl + scroll resizes, Delete removes.
+          Drag to move, drag a corner to resize and the round handle to rotate. Arrow keys nudge,
+          Shift snaps rotation to 15°, Alt turns snapping off, Ctrl + scroll resizes, Delete
+          removes. The controls below do the same without dragging.
         </p>
       </div>
 
@@ -478,10 +639,14 @@ export default function ProductEditor({
                 onClick={() => selectZone(z.key)}
               >
                 <span>{z.label}</span>
-                <span className="zone-fee">{z.fee > 0 ? `+${formatMoney(z.fee)}` : "Included"}</span>
+                <span className="zone-fee">
+                  {z.kind === "TEXT" ? "Text · " : ""}
+                  {z.fee > 0 ? `+${formatMoney(z.fee)}` : "Included"}
+                </span>
               </button>
             ))}
           </div>
+          <p className="hint">{placementNote(activeZone)}</p>
         </div>
 
         <div className="control-group">
@@ -577,33 +742,41 @@ export default function ProductEditor({
           <QtyStepper value={quantity} onChange={(n) => setQuantity(clamp(n, 1, 20))} />
         </div>
 
-        <div className="summary">
-          {feeZones.map((z) => (
-            <div key={z.key} className="summary-line">
-              <span>{z.label} print</span>
-              <span>+{formatMoney(z.fee)}</span>
+        <div className="editor-buy">
+          <div className="summary">
+            {feeZones.map((z) => (
+              <div key={z.key} className="summary-line">
+                <span>{z.label} print</span>
+                <span>+{formatMoney(z.fee)}</span>
+              </div>
+            ))}
+            <div className="summary-row">
+              <span>Total</span>
+              <strong>{formatMoney(total)}</strong>
             </div>
-          ))}
-          <div className="summary-row">
-            <span>Total</span>
-            <strong>{formatMoney(total)}</strong>
           </div>
+
+          {cartError && (
+            <p className="editor-alert" role="alert">
+              {cartError}
+            </p>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block"
+            onClick={addToCart}
+            disabled={adding || uploading || !variant?.available}
+          >
+            {adding ? "Adding..." : cartError ? "Try again" : "Add to cart"}
+          </button>
+
+          {added && (
+            <p className="added-note" role="status">
+              Added to your cart. <Link href="/cart">View cart</Link>
+            </p>
+          )}
         </div>
-
-        <button
-          type="button"
-          className="btn btn-primary btn-lg btn-block"
-          onClick={addToCart}
-          disabled={adding || !variant?.available}
-        >
-          {adding ? "Adding..." : "Add to cart"}
-        </button>
-
-        {added && (
-          <p className="added-note" role="status">
-            Added to your cart. <Link href="/cart">View cart</Link>
-          </p>
-        )}
       </div>
     </div>
   );

@@ -13,9 +13,28 @@ import {
 import type { Placement } from "@/components/product/types";
 
 type Gesture =
-  | { type: "move"; startX: number; startY: number; px: number; py: number; rect: DOMRect }
-  | { type: "resize"; startScale: number; startDist: number; cx: number; cy: number }
-  | { type: "rotate"; startRotation: number; startAngle: number; cx: number; cy: number };
+  | {
+      type: "move";
+      startX: number;
+      startY: number;
+      px: number;
+      py: number;
+      rect: DOMRect;
+    }
+  | {
+      type: "resize";
+      startScale: number;
+      startDist: number;
+      cx: number;
+      cy: number;
+    }
+  | {
+      type: "rotate";
+      startRotation: number;
+      startAngle: number;
+      cx: number;
+      cy: number;
+    };
 
 const SNAP = 0.025;
 const CORNERS = ["nw", "ne", "sw", "se"] as const;
@@ -57,7 +76,17 @@ export default function LayerOverlay({
   const gesture = useRef<Gesture | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const latest = useRef({ placement, onChange });
-  const [hud, setHud] = useState<string | null>(null);
+  // The readout is derived from the placement the editor actually kept, so it stays
+  // correct when a resize is capped at the print area's edge.
+  const [hudMode, setHudMode] = useState<"resize" | "rotate" | null>(null);
+  const hud =
+    hudMode === "resize"
+      ? widthIn
+        ? `${(placement.scale * widthIn).toFixed(1)} in wide`
+        : `${Math.round(placement.scale * 100)}%`
+      : hudMode === "rotate"
+        ? `${Math.round(placement.rotation)}°`
+        : null;
 
   useEffect(() => {
     latest.current = { placement, onChange };
@@ -74,7 +103,11 @@ export default function LayerOverlay({
       const { placement: p, onChange: change } = latest.current;
       change({
         ...p,
-        scale: clamp(p.scale * Math.exp(-e.deltaY * 0.0015), SCALE_MIN, SCALE_MAX),
+        scale: clamp(
+          p.scale * Math.exp(-e.deltaY * 0.0015),
+          SCALE_MIN,
+          SCALE_MAX,
+        ),
       });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
@@ -135,7 +168,8 @@ export default function LayerOverlay({
     begin(e, {
       type: "rotate",
       startRotation: placement.rotation,
-      startAngle: (Math.atan2(e.clientY - c.cy, e.clientX - c.cx) * 180) / Math.PI,
+      startAngle:
+        (Math.atan2(e.clientY - c.cy, e.clientX - c.cx) * 180) / Math.PI,
       cx: c.cx,
       cy: c.cy,
     });
@@ -172,23 +206,30 @@ export default function LayerOverlay({
 
     if (g.type === "resize") {
       const dist = Math.hypot(e.clientX - g.cx, e.clientY - g.cy);
-      const scale = clamp((g.startScale * dist) / g.startDist, SCALE_MIN, SCALE_MAX);
+      const scale = clamp(
+        (g.startScale * dist) / g.startDist,
+        SCALE_MIN,
+        SCALE_MAX,
+      );
       change({ ...p, scale });
-      setHud(widthIn ? `${(scale * widthIn).toFixed(1)} in wide` : `${Math.round(scale * 100)}%`);
+      setHudMode("resize");
     }
 
     if (g.type === "rotate") {
-      const angle = (Math.atan2(e.clientY - g.cy, e.clientX - g.cx) * 180) / Math.PI;
-      const rotation = normalizeAngle(snapRotation(g.startRotation + (angle - g.startAngle), e));
+      const angle =
+        (Math.atan2(e.clientY - g.cy, e.clientX - g.cx) * 180) / Math.PI;
+      const rotation = normalizeAngle(
+        snapRotation(g.startRotation + (angle - g.startAngle), e),
+      );
       change({ ...p, rotation });
-      setHud(`${Math.round(rotation)}°`);
+      setHudMode("rotate");
     }
   }
 
   function end() {
     if (!gesture.current) return;
     gesture.current = null;
-    setHud(null);
+    setHudMode(null);
     onGuides({ x: null, y: null });
   }
 
