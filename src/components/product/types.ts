@@ -1,6 +1,19 @@
-export type ViewKey = "front" | "back";
+// "left" / "right" are side profiles (wearer's left / right), used for sleeve prints.
+export type ViewKey = "front" | "back" | "left" | "right";
 export type ZoneKind = "IMAGE" | "TEXT";
-export type FontKey = "sans" | "display" | "serif";
+export type FontKey =
+  | "sans"
+  | "display"
+  | "serif"
+  | "bebas"
+  | "anton"
+  | "montserrat"
+  | "abril"
+  | "pacifico"
+  | "lobster"
+  | "marker"
+  | "caveat"
+  | "typewriter";
 
 export type ZoneDTO = {
   id: string;
@@ -52,11 +65,15 @@ export type ImageLayer = {
   placement: Placement;
 };
 
+// Text look beyond font and color. curve: -100 (arch down) .. 100 (arch up), 0 = straight.
+export type TextStyle = { curve: number; bold: boolean; italic: boolean };
+
 export type TextLayer = {
   kind: "text";
   text: string;
   font: FontKey;
   color: string;
+  style: TextStyle;
   placement: Placement;
 };
 

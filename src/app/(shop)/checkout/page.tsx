@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { formatMoney } from "@/lib/format";
-import { blockedReason, cartInclude, toMoney, unitCents, variantLabel } from "@/lib/orders";
+import { blockedReason, cartInclude, TEST_PAYMENTS, toMoney, unitCents, variantLabel } from "@/lib/orders";
 import CheckoutForm from "@/components/checkout/CheckoutForm";
 
 export const metadata: Metadata = { title: "Checkout" };
@@ -57,7 +57,9 @@ export default async function CheckoutPage() {
               <strong>{formatMoney(toMoney(totalCents))}</strong>
             </div>
             <p className="hint">
-              Payment isn&apos;t collected online yet. Your order is saved as pending.
+              {TEST_PAYMENTS
+                ? "Test mode: payment is simulated and no card is charged. Your order is saved as paid."
+                : "Payment isn't collected online yet. Your order is saved as pending."}
             </p>
           </aside>
         </div>

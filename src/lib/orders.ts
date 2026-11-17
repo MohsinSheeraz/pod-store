@@ -14,15 +14,21 @@ export const cartInclude = {
 export type CartWithItems = Prisma.CartGetPayload<{ include: typeof cartInclude }>;
 export type CartLine = CartWithItems["items"][number];
 
+// Payment isn't built yet. While this is on, checkout simulates a successful payment and saves
+// the order as PAID. Set PAYMENT_MODE=live once a real payment provider is connected.
+export const TEST_PAYMENTS = process.env.PAYMENT_MODE !== "live";
+
 export const toCents = (value: unknown) => Math.round(Number(value) * 100);
 export const toMoney = (cents: number) => cents / 100;
 
 // Server-side price of one unit: base price + size/color delta + a fee per print area.
 export function unitCents(item: CartLine) {
+  // A print area costs the same whether it holds a design, text or both.
+  const fees = new Map(item.prints.map((p) => [p.zoneId, toCents(p.zone.fee)]));
   return (
     toCents(item.variant.product.basePrice) +
     toCents(item.variant.priceDelta) +
-    item.prints.reduce((sum, p) => sum + toCents(p.zone.fee), 0)
+    [...fees.values()].reduce((sum, c) => sum + c, 0)
   );
 }
 
@@ -43,7 +49,7 @@ export function blockedReason(item: CartLine): string | null {
     return `${product.name} has nothing to print. Remove it from your cart.`;
   }
   for (const p of item.prints) {
-    const missing = p.zone.kind === "TEXT" ? !p.text : !p.design;
+    const missing = !p.text && !p.design;
     if (missing) {
       return `${product.name}: the ${p.zone.label} print is missing its artwork. Remove it from your cart.`;
     }

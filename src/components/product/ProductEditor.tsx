@@ -13,23 +13,25 @@ import {
   isDark,
   MIN_DPI,
   NO_GUIDES,
+  DEFAULT_TEXT_STYLE,
   SCALE_MAX,
   SCALE_MIN,
-  TEXT_COLORS,
-  TEXT_FONTS,
-  TEXT_MAX_LENGTH,
+  textLimit,
   type Guides,
 } from "@/lib/placement";
 import {
-  constrainPlacement,
-  layerKindAllowed,
+  conflictsWith,
+  isContained,
   usableZones,
   zoneRole,
   type LayerMetrics,
 } from "@/lib/placement-rules";
 import ProductSilhouette, { ProductShade, shapeFor } from "@/components/product/ProductSilhouette";
-import ZoneFrame from "@/components/product/ZoneFrame";
+import ZoneFrame, { toRender } from "@/components/product/ZoneFrame";
+import TextPanel from "@/components/product/TextPanel";
 import DesignPicker from "@/components/product/DesignPicker";
+import MockupModal from "@/components/product/MockupModal";
+import type { ExportZone } from "@/lib/mockup-export";
 import QtyStepper from "@/components/ui/QtyStepper";
 import type {
   DesignDTO,
@@ -37,6 +39,7 @@ import type {
   Layer,
   Placement,
   ProductDTO,
+  TextStyle,
   ViewKey,
   ZoneDTO,
 } from "@/components/product/types";
@@ -55,9 +58,21 @@ function loadImageSize(src: string) {
 
 function placementNote(zone: ZoneDTO) {
   return zoneRole(zone) === "left-chest"
-    ? "Text only. Prints on the wearer’s left chest, which is on your right when you look at the front."
+    ? "On the wearer’s left chest (your right when you look at the front)."
     : `${zone.widthIn} × ${zone.heightIn} in print area`;
 }
+
+// A print area holds up to two layers: a design and a line of text.
+type Kind = "image" | "text";
+const KINDS: Kind[] = ["image", "text"];
+const lk = (zoneKey: string, kind: Kind) => `${zoneKey}:${kind}`;
+
+const VIEW_NOTE: Record<ViewKey, string> = {
+  front: "Front · the garment’s left is on your right",
+  back: "Back",
+  left: "Left side view",
+  right: "Right side view",
+};
 
 const layerIdentity = (layer: Layer | undefined) =>
   layer ? (layer.kind === "image" ? layer.design.id : "text") : "none";
@@ -76,11 +91,13 @@ export default function ProductEditor({ product, loggedIn, catalog, mine }: Prop
 
   if (zones.length === 0) {
     return (
-      <div className="editor-alert" role="alert">
-        <p>This product can’t be customized right now. Please check back soon.</p>
-        <Link href="/#products" className="btn btn-ghost btn-sm">
-          Back to products
-        </Link>
+      <div className="editor-empty">
+        <div className="editor-alert" role="alert">
+          <p>This product can’t be customized right now. Please check back soon.</p>
+          <Link href="/#products" className="btn btn-ghost btn-sm">
+            Back to products
+          </Link>
+        </div>
       </div>
     );
   }
@@ -100,12 +117,16 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
   const [layers, setLayers] = useState<Record<string, Layer>>({});
   const [metricsMap, setMetricsMap] = useState<Record<string, LayerMetrics>>({});
   const [activeKey, setActiveKey] = useState(zones[0].key);
+  const [activeKind, setActiveKind] = useState<Kind>("image");
+  const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState<ViewKey>(zones[0].view);
   const [guides, setGuides] = useState<Guides>(NO_GUIDES);
   const [uploading, setUploading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
   const [cartError, setCartError] = useState("");
+  // Snapshot of every print, taken when the shopper opens "Preview mockups"
+  const [mockupPrints, setMockupPrints] = useState<(ExportZone & { view: ViewKey })[] | null>(null);
   const [uploads, setUploads] = useState<DesignDTO[]>(mine);
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -144,8 +165,12 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
   const shape = shapeFor(product.slug, product.categorySlug);
 
   const activeZone = zones.find((z) => z.key === activeKey) ?? zones[0];
-  const activeLayer: Layer | undefined = layers[activeZone.key];
-  const printed = zones.filter((z) => layers[z.key]);
+  const activeLayerKey = lk(activeZone.key, activeKind);
+  const activeLayer: Layer | undefined = layers[activeLayerKey];
+  const layersOf = (zoneKey: string) =>
+    KINDS.flatMap((k) => (layers[lk(zoneKey, k)] ? [{ kind: k, layer: layers[lk(zoneKey, k)] }] : []));
+  const printed = zones.filter((z) => layersOf(z.key).length > 0);
+  const layerCount = Object.keys(layers).length;
   const feeZones = printed.filter((z) => z.fee > 0);
 
   const unitPrice =
@@ -154,21 +179,17 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
     feeZones.reduce((sum, z) => sum + z.fee, 0);
   const total = unitPrice * quantity;
 
-  function selectZone(key: string) {
+  function selectZone(key: string, kind?: Kind) {
     const z = zones.find((zone) => zone.key === key);
     if (!z) return;
     setActiveKey(key);
     setView(z.view);
     setGuides(NO_GUIDES);
-  }
-
-  function changeView(next: ViewKey) {
-    setView(next);
-    if (activeZone.view !== next) {
-      const z = zones.find((zone) => zone.view === next);
-      if (z) setActiveKey(z.key);
+    if (kind) setActiveKind(kind);
+    else if (!layers[lk(key, activeKind)]) {
+      const existing = KINDS.find((k) => layers[lk(key, k)]);
+      if (existing) setActiveKind(existing);
     }
-    setGuides(NO_GUIDES);
   }
 
   function changeColor(name: string) {
@@ -201,23 +222,21 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
     setLayers((prev) => {
       const cur = prev[key];
       if (!cur) return prev;
+      // Designs are sized freely (bigger than the area or tiny); only the centre stays in the area.
       const merged = { ...cur.placement, ...patch };
-      const m = metricsMap[key];
-      const placement = m
-        ? constrainPlacement(merged, m.unit, m.frame)
-        : {
-            ...merged,
-            x: clamp(merged.x, 0, 1),
-            y: clamp(merged.y, 0, 1),
-            scale: clamp(merged.scale, SCALE_MIN, SCALE_MAX),
-          };
+      const placement = {
+        ...merged,
+        x: clamp(merged.x, 0, 1),
+        y: clamp(merged.y, 0, 1),
+        scale: clamp(merged.scale, SCALE_MIN, SCALE_MAX),
+      };
       return { ...prev, [key]: { ...cur, placement } };
     });
     setAdded(false);
   }
 
-  // The zone reports what it measured (after text edits, resizes, window changes). Keep the
-  // numbers and pull the layer back inside if the new size no longer fits.
+  // The zone reports what it measured (after text edits, resizes, window changes). Kept so the
+  // editor can tell when a print hangs outside its area.
   const handleMetrics = useCallback((key: string, m: LayerMetrics) => {
     setMetricsMap((prev) => {
       const cur = prev[key];
@@ -229,17 +248,27 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
         Math.abs(cur.frame.h - m.frame.h) < 0.5;
       return same ? prev : { ...prev, [key]: m };
     });
-    setLayers((prev) => {
-      const cur = prev[key];
-      if (!cur) return prev;
-      const next = constrainPlacement(cur.placement, m.unit, m.frame);
-      return next === cur.placement ? prev : { ...prev, [key]: { ...cur, placement: next } };
-    });
   }, []);
 
+  // Front and the left-chest monogram are either-or: starting on one clears the other.
+  function dropConflicts(zoneKey: string) {
+    const hit = conflictsWith(zoneKey).filter((k) => KINDS.some((kind) => layers[lk(k, kind)]));
+    if (hit.length === 0) return;
+    setLayers((prev) => {
+      const next = { ...prev };
+      for (const k of hit) for (const kind of KINDS) delete next[lk(k, kind)];
+      return next;
+    });
+    const names = hit.map((k) => zones.find((z) => z.key === k)?.label ?? k).join(", ");
+    const here = zones.find((z) => z.key === zoneKey)?.label ?? "this area";
+    toast(`${names} removed. Choose either ${names} or ${here}, not both.`);
+  }
+
   function setText(value: string) {
-    const key = activeZone.key;
-    const text = value.slice(0, TEXT_MAX_LENGTH);
+    const zone = activeZone;
+    const key = lk(zone.key, "text");
+    if (value.trim() && !layers[key]) dropConflicts(zone.key);
+    const text = value.slice(0, textLimit(zone));
     setAdded(false);
     if (!text.trim()) {
       setLayer(key, undefined);
@@ -250,9 +279,8 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
       if (cur?.kind === "text") {
         // Keep the text fitted to the print area while typing, unless the shopper
         // has resized it by hand.
-        const untouched =
-          Math.abs(cur.placement.scale - fitTextScale(activeZone, cur.text.length)) < 0.001;
-        const scale = untouched ? fitTextScale(activeZone, text.length) : cur.placement.scale;
+        const untouched = Math.abs(cur.placement.scale - fitTextScale(zone, cur.text.length)) < 0.001;
+        const scale = untouched ? fitTextScale(zone, text.length) : cur.placement.scale;
         return { ...prev, [key]: { ...cur, text, placement: { ...cur.placement, scale } } };
       }
       return {
@@ -262,30 +290,40 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
           text,
           font: "display",
           color: dark ? "#FFFFFF" : "#14161B",
-          placement: { x: 0.5, y: 0.5, scale: fitTextScale(activeZone, text.length), rotation: 0 },
+          style: DEFAULT_TEXT_STYLE,
+          placement: { x: 0.5, y: 0.5, scale: fitTextScale(zone, text.length), rotation: 0 },
         },
       };
     });
   }
 
-  function patchText(patch: { font?: FontKey; color?: string }) {
-    const key = activeZone.key;
+  function patchText(patch: { font?: FontKey; color?: string; style?: Partial<TextStyle> }) {
+    const key = lk(activeZone.key, "text");
     setAdded(false);
     setLayers((prev) => {
       const cur = prev[key];
       if (cur?.kind !== "text") return prev;
-      return { ...prev, [key]: { ...cur, ...patch } };
+      return {
+        ...prev,
+        [key]: {
+          ...cur,
+          font: patch.font ?? cur.font,
+          color: patch.color ?? cur.color,
+          style: { ...cur.style, ...patch.style },
+        },
+      };
     });
   }
 
   // Puts a design in a print area, fitted to it. Used for library picks and fresh uploads.
   async function placeDesign(zoneKey: string, design: DesignDTO) {
     const zone = zones.find((z) => z.key === zoneKey);
-    if (!zone || !layerKindAllowed(zone, "image")) return;
+    if (!zone) return;
     try {
       const dims = await loadImageSize(design.imageUrl);
+      dropConflicts(zone.key);
       const aspect = dims.w / dims.h;
-      setLayer(zone.key, {
+      setLayer(lk(zone.key, "image"), {
         kind: "image",
         design,
         aspect,
@@ -293,7 +331,7 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
         pixelW: design.imageUrl.endsWith(".svg") ? Infinity : dims.w,
         placement: fitPlacement(zone, aspect),
       });
-      selectZone(zone.key);
+      selectZone(zone.key, "image");
     } catch {
       toast.error("Could not load that design. Try another one.");
     }
@@ -306,10 +344,6 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
   async function uploadFile(file: File, zoneKey: string) {
     const zone = zones.find((z) => z.key === zoneKey);
     if (!zone) return;
-    if (!layerKindAllowed(zone, "image")) {
-      toast.error("This print area takes text, not artwork.");
-      return;
-    }
     if (!loggedIn) {
       toast.error("Log in to upload artwork.");
       return;
@@ -353,21 +387,20 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
 
   function openPicker(zoneKey: string) {
     uploadZoneRef.current = zoneKey;
-    selectZone(zoneKey);
+    selectZone(zoneKey, "image");
     fileRef.current?.click();
   }
 
   function focusText(zoneKey: string) {
-    selectZone(zoneKey);
+    selectZone(zoneKey, "text");
     requestAnimationFrame(() => textRef.current?.focus());
   }
 
   function emptyActionFor(z: (typeof zones)[number]) {
-    if (z.kind === "TEXT") return { label: "Add text", run: () => focusText(z.key) };
     return {
-      label: "Choose a design",
+      label: "Add design",
       run: () => {
-        selectZone(z.key);
+        selectZone(z.key, "image");
         requestAnimationFrame(() =>
           document.querySelector(".picker")?.scrollIntoView({ behavior: "smooth", block: "center" })
         );
@@ -396,18 +429,20 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
         body: JSON.stringify({
           variantId: variant.id,
           quantity,
-          prints: printed.map((z) => {
-            const l = layers[z.key];
-            return l.kind === "image"
-              ? { zoneId: z.id, designId: l.design.id, placement: l.placement }
-              : {
-                  zoneId: z.id,
-                  text: l.text,
-                  font: l.font,
-                  color: l.color,
-                  placement: l.placement,
-                };
-          }),
+          prints: printed.flatMap((z) =>
+            layersOf(z.key).map(({ layer: l }) =>
+              l.kind === "image"
+                ? { zoneId: z.id, designId: l.design.id, placement: l.placement }
+                : {
+                    zoneId: z.id,
+                    text: l.text,
+                    font: l.font,
+                    color: l.color,
+                    textStyle: l.style,
+                    placement: l.placement,
+                  }
+            )
+          ),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -433,14 +468,20 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
       : null;
   const printWidthIn = activeLayer ? activeLayer.placement.scale * activeZone.widthIn : 0;
 
+  const activeMetrics = activeLayer ? metricsMap[activeLayerKey] : undefined;
+  const overhang =
+    activeLayer && activeMetrics
+      ? !isContained(activeLayer.placement, activeMetrics.unit, activeMetrics.frame)
+      : false;
+
   function centerActive() {
-    updatePlacement(activeZone.key, { x: 0.5, y: 0.5 });
+    updatePlacement(activeLayerKey, { x: 0.5, y: 0.5 });
   }
 
   function fitActive() {
     if (!activeLayer) return;
     updatePlacement(
-      activeZone.key,
+      activeLayerKey,
       activeLayer.kind === "image"
         ? fitPlacement(activeZone, activeLayer.aspect)
         : { x: 0.5, y: 0.5, scale: fitTextScale(activeZone, activeLayer.text.length) }
@@ -448,7 +489,28 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
   }
 
   function removeActive() {
-    setLayer(activeZone.key, undefined);
+    setLayer(activeLayerKey, undefined);
+  }
+
+  // Opens the mockup gallery: the design on a model, on the plain product, and on sleeves.
+  function openMockups() {
+    if (printed.length === 0) {
+      toast.error("Add a design first.");
+      return;
+    }
+    setMockupPrints(
+      zones.flatMap((z) =>
+        layersOf(z.key).map(({ layer: l }) => ({
+          key: z.key,
+          view: z.view,
+          x: z.x,
+          y: z.y,
+          w: z.w,
+          h: z.h,
+          layer: toRender(l),
+        }))
+      )
+    );
   }
 
   function clearAll() {
@@ -457,151 +519,31 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
     setAdded(false);
   }
 
-  const designName = !activeLayer
-    ? "None yet"
-    : activeLayer.kind === "image"
-      ? activeLayer.design.name
-      : `“${activeLayer.text}”`;
-
   const isApparel = shape === "tee" || shape === "hoodie";
 
   return (
-    <div className="editor">
-      <div className="editor-preview">
-        <div className="editor-context" aria-label="Current selection">
-          <div>
-            <span>Product</span>
-            <strong>{product.name}</strong>
-            <small>
-              {color}
-              {size !== "One size" ? ` · ${size}` : ""}
-            </small>
-          </div>
-          <div>
-            <span>Design</span>
-            <strong>{designName}</strong>
-            <small>{activeLayer ? "On the mockup" : "Add one below"}</small>
-          </div>
-          <div>
-            <span>Placement</span>
-            <strong>{activeZone.label}</strong>
-            <small>{activeZone.fee > 0 ? `+${formatMoney(activeZone.fee)}` : "Included"}</small>
-          </div>
+    <div className={collapsed ? "editor-shell is-collapsed" : "editor-shell"}>
+      <aside className="editor-sidebar" id="editor-sidebar" aria-label="Customize product" aria-hidden={collapsed}>
+        <div className="sidebar-head">
+          <Link href="/#products" className="back-link">
+            ← Products
+          </Link>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-expanded={!collapsed}
+            aria-controls="editor-sidebar"
+            title="Hide panel"
+            onClick={() => setCollapsed(true)}
+          >
+            ‹
+          </button>
         </div>
 
-        <div
-          className="editor-stage"
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-          }}
-          onDrop={(e) => {
-            const file = e.dataTransfer.files[0];
-            if (!file) return;
-            e.preventDefault();
-            void uploadFile(file, activeZone.key);
-          }}
-          aria-busy={uploading}
-        >
-          {views.length > 1 && (
-            <div className="view-tabs stage-views" role="group" aria-label="Product view">
-              {views.map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  className="chip"
-                  aria-pressed={v === view}
-                  onClick={() => changeView(v)}
-                >
-                  {v === "front" ? "Front" : "Back"}
-                </button>
-              ))}
-            </div>
-          )}
-          {isApparel && (
-            <p className="orientation-note stage-note">
-              {view === "front"
-                ? "Front view. The garment’s left side is on your right."
-                : "Back view. The garment’s left side is on your left."}
-            </p>
-          )}
-          <ProductSilhouette shape={shape} view={view} fill={colorHex} />
-          {zones
-            .filter((z) => z.view === view)
-            .map((z) => (
-              <ZoneFrame
-                // Remount when the layer's identity changes so measurements are never stale.
-                key={`${z.key}:${layerIdentity(layers[z.key])}`}
-                zone={z}
-                layer={layers[z.key]}
-                active={z.key === activeZone.key}
-                dark={dark}
-                guides={z.key === activeZone.key ? guides : NO_GUIDES}
-                stack={stack[z.key] ?? 1}
-                emptyAction={emptyActionFor(z)}
-                onSelect={() => selectZone(z.key)}
-                onChange={(p) => updatePlacement(z.key, p)}
-                onGuides={setGuides}
-                onMetrics={handleMetrics}
-                onRemove={() => setLayer(z.key, undefined)}
-                onDropFile={
-                  layerKindAllowed(z, "image")
-                    ? (file) => {
-                        selectZone(z.key);
-                        void uploadFile(file, z.key);
-                      }
-                    : undefined
-                }
-              />
-            ))}
-          <ProductShade shape={shape} view={view} />
-        </div>
-
-        <p className="visually-hidden" role="status" aria-live="polite">
-          {uploading ? "Uploading artwork" : ""}
-        </p>
-
-        {activeLayer ? (
-          <div className="stage-toolbar">
-            <div className="stage-readout">
-              {activeLayer.kind === "image" && lowDpi !== null ? (
-                <p className={lowDpi < MIN_DPI ? "warn" : "hint"}>
-                  {lowDpi < MIN_DPI
-                    ? `Low resolution: about ${Math.round(lowDpi)} DPI at ${printWidthIn.toFixed(1)} in wide. It may print blurry.`
-                    : `Prints about ${printWidthIn.toFixed(1)} in wide at ${Math.round(lowDpi)} DPI.`}
-                </p>
-              ) : activeLayer.kind === "image" ? (
-                <p className="hint">Vector art: prints sharp at this size ({printWidthIn.toFixed(1)} in wide).</p>
-              ) : (
-                <p className="hint">{activeZone.label}</p>
-              )}
-              <p className="hint">Drag to move, drag a corner to resize. It stays inside the print area.</p>
-            </div>
-            <div className="art-actions">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={centerActive}>
-                Center
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={fitActive}>
-                Fit to area
-              </button>
-              <button type="button" className="btn btn-danger btn-sm" onClick={removeActive}>
-                Remove design
-              </button>
-            </div>
-          </div>
-        ) : (
-          <p className="stage-hint">
-            {activeZone.kind === "TEXT"
-              ? "Type your initials in the panel. A monogram prints on the left chest only."
-              : "Pick a ready-made design or upload your own. It lands on the highlighted print area."}
-          </p>
-        )}
-      </div>
-
-      <div className="editor-panel">
-        <div>
+        <div className="sidebar-body editor-panel">
+        <div className="panel-head">
           <h1 className="editor-title">{product.name}</h1>
           <p className="editor-price">{formatMoney(unitPrice)}</p>
-          <p className="editor-desc">{product.description}</p>
         </div>
 
         <div className="control-group">
@@ -647,34 +589,64 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
 
         <div className="control-group">
           <span className="control-label">
-            Where to print <span>{printed.length} of {zones.length} used</span>
+            <b className="step">1</b> Print area{" "}
+            <span>
+              {printed.length} of {zones.length} used
+            </span>
           </span>
-          <div className="zone-list" role="group" aria-label="Print areas">
+          <div className="area-grid" role="group" aria-label="Print areas">
             {zones.map((z) => (
               <button
                 key={z.key}
                 type="button"
-                className={layers[z.key] ? "zone-chip has-art" : "zone-chip"}
+                className={layersOf(z.key).length > 0 ? "area-card has-art" : "area-card"}
                 aria-pressed={z.key === activeZone.key}
                 onClick={() => selectZone(z.key)}
               >
-                <span>{z.label}</span>
+                <span className="area-name">{z.label}</span>
                 <span className="zone-fee">
-                  {layers[z.key] ? "Design added · " : z.kind === "TEXT" ? "Text · " : ""}
+                  {layersOf(z.key).length > 0
+                    ? "✓ Added"
+                    : conflictsWith(z.key).some((k) => layersOf(k).length > 0)
+                      ? `Replaces ${zones.find((o) => o.key === conflictsWith(z.key).find((k) => layersOf(k).length > 0))?.label ?? "other"}`
+                    : z.view === "left" || z.view === "right"
+                      ? "Side view"
+                      : z.view === "back"
+                        ? "Back view"
+                        : "Front view"}
+                  {" · "}
                   {z.fee > 0 ? `+${formatMoney(z.fee)}` : "Included"}
                 </span>
               </button>
             ))}
           </div>
-          <p className="hint">{placementNote(activeZone)}</p>
         </div>
 
         <div className="control-group">
           <span className="control-label">
-            {activeZone.label} <span>{activeZone.kind === "TEXT" ? "Monogram" : "Design"}</span>
+            <b className="step">2</b> Design <span>{activeZone.label}</span>
           </span>
+          <p className="hint">{placementNote(activeZone)}</p>
 
-          {activeZone.kind === "IMAGE" && (
+          <div className="seg" role="group" aria-label="Add to this print area">
+            <button
+              type="button"
+              aria-pressed={activeKind === "image"}
+              onClick={() => selectZone(activeZone.key, "image")}
+            >
+              Design{layers[lk(activeZone.key, "image")] && <i className="seg-dot" />}
+            </button>
+            <button
+              type="button"
+              aria-pressed={activeKind === "text"}
+              onClick={() => focusText(activeZone.key)}
+            >
+              {activeZone.kind === "TEXT" ? "Initials" : "Text"}
+              {layers[lk(activeZone.key, "text")] && <i className="seg-dot" />}
+            </button>
+          </div>
+
+          {activeKind === "image" && (
             <DesignPicker
               catalog={catalog}
               mine={uploads}
@@ -686,57 +658,22 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
             />
           )}
 
-          {activeZone.kind === "TEXT" && (
-            <>
-              <input
-                ref={textRef}
-                className="text-input"
-                type="text"
-                maxLength={TEXT_MAX_LENGTH}
-                placeholder="Initials, up to 6 characters"
-                aria-label={`${activeZone.label} text`}
-                value={activeLayer?.kind === "text" ? activeLayer.text : ""}
-                onChange={(e) => setText(e.target.value)}
-              />
-              {activeLayer?.kind === "text" && (
-                <>
-                  <div className="chips" role="group" aria-label="Font">
-                    {(Object.keys(TEXT_FONTS) as FontKey[]).map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        className="chip"
-                        aria-pressed={activeLayer.font === f}
-                        onClick={() => patchText({ font: f })}
-                      >
-                        {TEXT_FONTS[f].label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="swatches" role="group" aria-label="Text color">
-                    {TEXT_COLORS.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className="swatch"
-                        style={{ backgroundColor: c }}
-                        aria-label={`Text color ${c}`}
-                        aria-pressed={activeLayer.color === c}
-                        onClick={() => patchText({ color: c })}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </>
+          {activeKind === "text" && (
+            <TextPanel
+              zone={activeZone}
+              layer={activeLayer?.kind === "text" ? activeLayer : undefined}
+              inputRef={textRef}
+              onText={setText}
+              onPatch={patchText}
+            />
           )}
 
           {activeLayer && (
             <button type="button" className="btn btn-danger btn-sm remove-design" onClick={removeActive}>
-              Remove {activeLayer.kind === "text" ? "monogram" : "design"} from {activeZone.label}
+              Remove {activeLayer.kind === "text" ? "text" : "design"} from {activeZone.label}
             </button>
           )}
-          {printed.length > 1 && (
+          {layerCount > 1 && (
             <button type="button" className="link-btn" onClick={clearAll}>
               Clear all designs
             </button>
@@ -759,7 +696,9 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
           <QtyStepper value={quantity} onChange={(n) => setQuantity(clamp(n, 1, 20))} />
         </div>
 
-        <div className="editor-buy">
+        </div>
+
+        <div className="sidebar-foot editor-buy">
           <div className="summary">
             {feeZones.map((z) => (
               <div key={z.key} className="summary-line">
@@ -779,14 +718,21 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
             </p>
           )}
 
-          <button
-            type="button"
-            className="btn btn-primary btn-lg btn-block"
-            onClick={addToCart}
-            disabled={adding || uploading || !variant?.available}
-          >
-            {adding ? "Adding..." : cartError ? "Try again" : "Add to cart"}
-          </button>
+          <div className="foot-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-lg"
+              onClick={addToCart}
+              disabled={adding || uploading || !variant?.available}
+            >
+              {adding ? "Adding..." : cartError ? "Try again" : "Add to cart"}
+            </button>
+            {printed.length > 0 && (
+              <button type="button" className="btn btn-ghost btn-lg" onClick={openMockups}>
+                Preview
+              </button>
+            )}
+          </div>
 
           {added && (
             <p className="added-note" role="status">
@@ -794,7 +740,132 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
             </p>
           )}
         </div>
-      </div>
+      </aside>
+
+      <section className="editor-canvas" aria-label="Product preview">
+        <div className="canvas-bar">
+          {collapsed && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              aria-expanded={false}
+              aria-controls="editor-sidebar"
+              onClick={() => setCollapsed(false)}
+            >
+              ☰ Customize
+            </button>
+          )}
+          <p className="canvas-note">{isApparel ? VIEW_NOTE[view] : activeZone.label}</p>
+
+          {activeLayer ? (
+            <>
+              <p className={lowDpi !== null && lowDpi < MIN_DPI ? "canvas-info warn" : "canvas-info"} role="status">
+                {overhang
+                  ? "Parts outside the dashed area won't be printed. "
+                  : ""}
+                {activeLayer.kind === "image"
+                  ? lowDpi !== null
+                    ? lowDpi < MIN_DPI
+                      ? `Low resolution: ~${Math.round(lowDpi)} DPI at ${printWidthIn.toFixed(1)} in wide. May print blurry.`
+                      : `${printWidthIn.toFixed(1)} in wide · ${Math.round(lowDpi)} DPI`
+                    : `Vector art · ${printWidthIn.toFixed(1)} in wide, prints sharp`
+                  : `Text on ${activeZone.label}`}
+              </p>
+              <div className="art-actions">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={centerActive}>
+                  Center
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={fitActive}>
+                  Fit
+                </button>
+                <button type="button" className="btn btn-danger btn-sm" onClick={removeActive}>
+                  Remove {activeLayer.kind === "text" ? "text" : "design"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="canvas-info">
+              {activeKind === "text"
+                ? "Type your text in the panel. It lands on the highlighted print area."
+                : "Pick a ready-made design or upload your own. It lands on the highlighted print area."}
+            </p>
+          )}
+        </div>
+
+        <div className="stage-wrap">
+        <div
+          className="editor-stage"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            const file = e.dataTransfer.files[0];
+            if (!file) return;
+            e.preventDefault();
+            void uploadFile(file, activeZone.key);
+          }}
+          aria-busy={uploading}
+        >
+          <ProductSilhouette shape={shape} view={view} fill={colorHex} />
+          {zones
+            .filter((z) => z.view === view)
+            .flatMap((z) => {
+              const present = layersOf(z.key);
+              // An empty area still gets one frame; otherwise one frame per layer.
+              const entries: { kind: Kind; layer: Layer | undefined }[] =
+                present.length > 0 ? present : [{ kind: activeKind, layer: undefined }];
+              return entries.map((e, i) => {
+                const key = lk(z.key, e.kind);
+                const zoneActive = z.key === activeZone.key;
+                return (
+                  <ZoneFrame
+                    // Remount when the layer's identity changes so measurements are never stale.
+                    key={`${key}:${layerIdentity(e.layer)}`}
+                    zone={z}
+                    layer={e.layer}
+                    layerKey={key}
+                    active={zoneActive}
+                    selected={zoneActive && e.kind === activeKind}
+                    bare={i > 0}
+                    dark={dark}
+                    guides={zoneActive && e.kind === activeKind ? guides : NO_GUIDES}
+                    stack={stack[z.key] ?? 1}
+                    emptyAction={emptyActionFor(z)}
+                    onSelect={() => selectZone(z.key, e.kind)}
+                    onChange={(p) => updatePlacement(key, p)}
+                    onGuides={setGuides}
+                    onMetrics={handleMetrics}
+                    onRemove={() => setLayer(key, undefined)}
+                    onDropFile={
+                      i === 0
+                        ? (file) => {
+                            selectZone(z.key, "image");
+                            void uploadFile(file, z.key);
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              });
+            })}
+          <ProductShade shape={shape} view={view} />
+        </div>
+
+        </div>
+        <p className="visually-hidden" role="status" aria-live="polite">
+          {uploading ? "Uploading artwork" : ""}
+        </p>
+      </section>
+
+      {mockupPrints && (
+        <MockupModal
+          shape={shape}
+          fill={colorHex}
+          name={`${product.name} ${color}`}
+          prints={mockupPrints}
+          onClose={() => setMockupPrints(null)}
+        />
+      )}
     </div>
   );
 }

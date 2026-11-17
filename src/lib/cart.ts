@@ -1,5 +1,5 @@
 import { TEXT_FONTS } from "@/lib/placement";
-import type { FontKey, Placement } from "@/components/product/types";
+import type { FontKey, Placement, TextStyle } from "@/components/product/types";
 
 export const MAX_QTY = 20;
 
@@ -18,4 +18,14 @@ export function asPlacement(value: unknown): Placement {
 
 export function asFont(value: string | null): FontKey {
   return value && value in TEXT_FONTS ? (value as FontKey) : "sans";
+}
+
+// Text prints keep their look (curve, bold, italic) next to the position in the placement JSON.
+export function asTextStyle(value: unknown): TextStyle {
+  const p = (value ?? {}) as Record<string, unknown>;
+  return {
+    curve: isNum(p.curve) ? Math.max(-100, Math.min(100, p.curve)) : 0,
+    bold: p.bold === true,
+    italic: p.italic === true,
+  };
 }

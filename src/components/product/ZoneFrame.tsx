@@ -10,7 +10,14 @@ import type { Layer, Placement, ZoneDTO } from "@/components/product/types";
 type Props = {
   zone: ZoneDTO;
   layer: Layer | undefined;
+  // Key of this layer in the editor ("front:image"), used for measurements
+  layerKey: string;
+  // The print area is the one being edited
   active: boolean;
+  // This layer (not just its area) is the selected one
+  selected: boolean;
+  // A second layer in the same area: draws no frame, label or empty state of its own
+  bare?: boolean;
   dark: boolean;
   guides: Guides;
   // CSS stacking order: smaller print areas sit above larger ones that overlap them
@@ -34,10 +41,15 @@ function toRender(layer: Layer): LayerRender {
     : layer;
 }
 
+export { toRender };
+
 export default function ZoneFrame({
   zone,
   layer,
+  layerKey,
   active,
+  selected,
+  bare = false,
   dark,
   guides,
   stack,
@@ -93,9 +105,9 @@ export default function ZoneFrame({
 
   useEffect(() => {
     if (metrics.unit.w > 0 || metrics.unit.h > 0) {
-      onMetrics(zone.key, { unit: metrics.unit, frame: metrics.frame });
+      onMetrics(layerKey, { unit: metrics.unit, frame: metrics.frame });
     }
-  }, [metrics, zone.key, onMetrics]);
+  }, [metrics, layerKey, onMetrics]);
 
   const className = [
     "zone-frame",
@@ -103,6 +115,7 @@ export default function ZoneFrame({
     dark && "is-dark",
     dropping && "is-drop",
     layer && "has-layer",
+    bare && "is-bare",
   ]
     .filter(Boolean)
     .join(" ");
@@ -136,7 +149,7 @@ export default function ZoneFrame({
         height: `${zone.h}%`,
         zIndex: stack,
       }}
-      onPointerDown={active ? undefined : onSelect}
+      onPointerDown={active || bare ? undefined : onSelect}
       onDragEnter={(e) => {
         if (!isFileDrag(e)) return;
         e.preventDefault();
@@ -160,9 +173,18 @@ export default function ZoneFrame({
         if (file) onDropFile?.(file);
       }}
     >
-      <span className={tagClass} aria-hidden="true">
-        {tag}
-      </span>
+      {!bare && (
+        <span className={tagClass} aria-hidden="true">
+          {tag}
+        </span>
+      )}
+
+      {/* A faded, unclipped copy: shows what hangs outside the print area (it won't print). */}
+      {render && render.kind === "image" && (
+        <div className="zone-ghost" aria-hidden="true">
+          <LayerView layer={render} />
+        </div>
+      )}
 
       <div ref={clipRef} className="zone-clip">
         {!render && (
@@ -191,7 +213,7 @@ export default function ZoneFrame({
           box={metrics.box}
           frameRef={clipRef}
           label={zone.label}
-          selected={active}
+          selected={selected}
           widthIn={layer.kind === "image" ? zone.widthIn : null}
           onSelect={onSelect}
           onChange={onChange}
@@ -200,10 +222,10 @@ export default function ZoneFrame({
         />
       )}
 
-      {active && guides.x !== null && (
+      {selected && guides.x !== null && (
         <span className="guide guide-v" style={{ left: `${guides.x * 100}%` }} />
       )}
-      {active && guides.y !== null && (
+      {selected && guides.y !== null && (
         <span className="guide guide-h" style={{ top: `${guides.y * 100}%` }} />
       )}
     </div>

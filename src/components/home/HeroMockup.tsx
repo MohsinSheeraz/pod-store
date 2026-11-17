@@ -19,8 +19,8 @@ export default function HeroMockup() {
 
   const marks = color.dark ? "rgba(255,255,255,0.6)" : "rgba(20,22,27,0.5)";
   const art = color.dark
-    ? { a: "#F2B84B", b: "#F1F0EC" }
-    : { a: "#2547F5", b: "#14161B" };
+    ? { a: "#CED4DA", b: "#F8F9FA" }
+    : { a: "#1F2E4A", b: "#343A40" };
 
   return (
     <div className="mockup">

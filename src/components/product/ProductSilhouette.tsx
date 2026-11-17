@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import type { ViewKey } from "@/components/product/types";
 
 export type Shape = "tee" | "hoodie" | "mug" | "tote" | "poster";
 
@@ -28,8 +29,16 @@ const DARK = "rgba(0,0,0,0.18)";
 const teePath = (neck: number) =>
   `M130 30 L90 45 L20 95 L55 150 L95 125 L95 385 Q95 395 105 395 L295 395 Q305 395 305 385 L305 125 L345 150 L380 95 L310 45 L270 30 Q250 ${neck} 200 ${neck} Q150 ${neck} 130 30 Z`;
 
+// Full-length sleeves hang down beside the body, as on a real hoodie.
 const hoodiePath = (neck: number) =>
-  `M135 40 L95 55 L25 130 L60 175 L95 150 L95 390 Q95 400 105 400 L295 400 Q305 400 305 390 L305 150 L340 175 L375 130 L305 55 L265 40 Q250 ${neck} 200 ${neck} Q150 ${neck} 135 40 Z`;
+  `M135 40 L95 55 L45 95 Q22 200 20 330 L62 338 Q70 250 95 190 L95 390 Q95 400 105 400 L295 400 Q305 400 305 390 L305 190 Q330 250 338 338 L380 330 Q378 200 355 95 L305 55 L265 40 Q250 ${neck} 200 ${neck} Q150 ${neck} 135 40 Z`;
+
+// Side profiles (wearer's left; the right view is this mirrored). Front of the garment faces left.
+const TEE_SIDE_BODY = "M151 58 Q163 36 198 34 Q233 36 243 60 L247 392 Q247 398 239 398 L159 398 Q151 398 151 392 Z";
+const TEE_SIDE_SLEEVE = "M148 54 Q198 30 252 56 L262 160 Q200 182 138 160 Z";
+const HOOD_SIDE_HOOD = "M192 40 Q242 14 282 50 Q304 96 262 140 L254 72 Q232 44 192 40 Z";
+const HOOD_SIDE_BODY = "M160 70 Q164 44 206 40 Q250 44 254 72 L260 400 Q260 406 252 406 L164 406 Q156 406 156 400 Z";
+const HOOD_SIDE_SLEEVE = "M160 62 Q204 40 250 62 Q254 130 236 220 Q228 290 230 348 Q184 362 138 346 Q138 260 152 190 Q164 120 160 62 Z";
 
 const HOOD_FRONT = "M145 48 Q150 8 200 8 Q250 8 255 48 Q240 80 200 80 Q160 80 145 48 Z";
 const HOOD_BACK = "M140 50 Q150 6 200 6 Q250 6 260 50 Q232 74 200 74 Q168 74 140 50 Z";
@@ -39,11 +48,15 @@ const TOTE_BODY = "M80 140 L320 140 L335 385 L65 385 Z";
 const TOTE_STRAP = "M140 140 C140 30 260 30 260 140";
 const POSTER = "M60 30 H340 V390 H60 Z";
 
-function outlines(shape: Shape, back: boolean): string[] {
+const isSide = (view: ViewKey) => view === "left" || view === "right";
+
+function outlines(shape: Shape, view: ViewKey): string[] {
+  const back = view === "back";
   switch (shape) {
     case "tee":
-      return [teePath(back ? 40 : 60)];
+      return isSide(view) ? [TEE_SIDE_BODY, TEE_SIDE_SLEEVE] : [teePath(back ? 40 : 60)];
     case "hoodie":
+      if (isSide(view)) return [HOOD_SIDE_HOOD, HOOD_SIDE_BODY, HOOD_SIDE_SLEEVE];
       return back ? [hoodiePath(60), HOOD_BACK] : [HOOD_FRONT, hoodiePath(75)];
     case "mug":
       return [MUG_BODY];
@@ -54,9 +67,12 @@ function outlines(shape: Shape, back: boolean): string[] {
   }
 }
 
+// The right-hand profile is the left one mirrored.
+const mirrorOf = (view: ViewKey) => (view === "right" ? "translate(400 0) scale(-1 1)" : undefined);
+
 type Props = {
   shape: Shape;
-  view: "front" | "back";
+  view: ViewKey;
 };
 
 const stitch = {
@@ -84,12 +100,13 @@ function Clip({ id, d }: { id: string; d: string[] }) {
 export default function ProductSilhouette({ shape, fill, view }: Props & { fill: string }) {
   const uid = useUid();
   const back = view === "back";
+  const side = isSide(view);
   const clip = `${uid}-cp`;
   const hl = `${uid}-hl`;
   const ds = `${uid}-ds`;
   const soft = `${uid}-soft`;
   const weave = `${uid}-weave`;
-  const outline = outlines(shape, back);
+  const outline = outlines(shape, view);
 
   const neck = shape === "tee" ? (back ? 40 : 60) : back ? 60 : 75;
 
@@ -112,9 +129,10 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
         </pattern>
         <Clip id={clip} d={outline} />
       </defs>
+      <g transform={mirrorOf(view)}>
 
       {/* ---------------- T-shirt ---------------- */}
-      {shape === "tee" && (
+      {shape === "tee" && !side && (
         <>
           <g filter={`url(#${ds})`}>
             <path d={teePath(neck)} fill={fill} stroke={EDGE} strokeWidth="1.5" />
@@ -150,7 +168,7 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
       )}
 
       {/* ---------------- Hoodie ---------------- */}
-      {shape === "hoodie" && !back && (
+      {shape === "hoodie" && !side && !back && (
         <>
           <g filter={`url(#${ds})`}>
             <path d={HOOD_FRONT} fill={fill} stroke={EDGE} strokeWidth="1.5" />
@@ -173,23 +191,26 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
           <circle cx="211" cy="144" r="3" fill="#cfc9bb" stroke={EDGE} />
           {/* kangaroo pocket */}
           <path
-            d="M140 330 L260 330 L276 386 L124 386 Z"
+            d="M140 314 L260 314 L274 364 L126 364 Z"
             fill="rgba(0,0,0,0.05)"
             stroke={EDGE}
             strokeWidth="1.3"
           />
-          <path d="M143 335 L257 335" {...stitch} />
+          <path d="M143 319 L257 319" {...stitch} />
           {/* seams, cuffs, hem rib */}
-          <path d="M96 58 Q106 105 96 150" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M304 58 Q294 105 304 150" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M33 124 L68 169" fill="none" stroke={DARK} strokeWidth="6" strokeLinecap="round" />
-          <path d="M367 124 L332 169" fill="none" stroke={DARK} strokeWidth="6" strokeLinecap="round" />
-          <path d="M95 384 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.08)" />
-          <path d="M97 384 H303" {...stitch} />
+          <path d="M97 58 Q101 125 96 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
+          <path d="M303 58 Q299 125 304 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
+          <path d="M20.6 310 L64 320 L62 338 L20 330 Z" fill="rgba(0,0,0,0.1)" />
+          <path d="M379.4 310 L336 320 L338 338 L380 330 Z" fill="rgba(0,0,0,0.1)" />
+          <path d="M22 311 L64 321" {...stitch} />
+          <path d="M378 311 L336 321" {...stitch} />
+          <path d="M95 368 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.09)" />
+          <path d="M105 370 V398 M115 370 V398 M125 370 V398 M135 370 V398 M145 370 V398 M155 370 V398 M165 370 V398 M175 370 V398 M185 370 V398 M195 370 V398 M205 370 V398 M215 370 V398 M225 370 V398 M235 370 V398 M245 370 V398 M255 370 V398 M265 370 V398 M275 370 V398 M285 370 V398 M295 370 V398" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="1" />
+          <path d="M97 368 H303" {...stitch} />
         </>
       )}
 
-      {shape === "hoodie" && back && (
+      {shape === "hoodie" && !side && back && (
         <>
           <g filter={`url(#${ds})`}>
             <path d={hoodiePath(60)} fill={fill} stroke={EDGE} strokeWidth="1.5" />
@@ -200,12 +221,51 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
           </g>
           <path d="M140 52 Q150 70 200 70 Q250 70 260 52" fill="none" stroke={DARK} strokeWidth="2" />
           <path d="M200 8 V70" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="1.2" />
-          <path d="M96 58 Q106 105 96 150" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M304 58 Q294 105 304 150" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M33 124 L68 169" fill="none" stroke={DARK} strokeWidth="6" strokeLinecap="round" />
-          <path d="M367 124 L332 169" fill="none" stroke={DARK} strokeWidth="6" strokeLinecap="round" />
-          <path d="M95 384 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.08)" />
-          <path d="M97 384 H303" {...stitch} />
+          <path d="M97 58 Q101 125 96 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
+          <path d="M303 58 Q299 125 304 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
+          <path d="M20.6 310 L64 320 L62 338 L20 330 Z" fill="rgba(0,0,0,0.1)" />
+          <path d="M379.4 310 L336 320 L338 338 L380 330 Z" fill="rgba(0,0,0,0.1)" />
+          <path d="M22 311 L64 321" {...stitch} />
+          <path d="M378 311 L336 321" {...stitch} />
+          <path d="M95 368 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.09)" />
+          <path d="M105 370 V398 M115 370 V398 M125 370 V398 M135 370 V398 M145 370 V398 M155 370 V398 M165 370 V398 M175 370 V398 M185 370 V398 M195 370 V398 M205 370 V398 M215 370 V398 M225 370 V398 M235 370 V398 M245 370 V398 M255 370 V398 M265 370 V398 M275 370 V398 M285 370 V398 M295 370 V398" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="1" />
+          <path d="M97 368 H303" {...stitch} />
+        </>
+      )}
+
+      {/* ---------------- Side profiles (sleeve prints) ---------------- */}
+      {shape === "tee" && side && (
+        <>
+          <g filter={`url(#${ds})`}>
+            <path d={TEE_SIDE_BODY} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+            <path d={TEE_SIDE_SLEEVE} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+          </g>
+          <g clipPath={`url(#${clip})`}>
+            <rect x="125" y="0" width="140" height="420" fill={`url(#${hl})`} />
+          </g>
+          <path d="M160 44 Q198 62 236 44" fill="none" stroke={DARK} strokeWidth="6" strokeLinecap="round" />
+          <path d="M149 56 Q152 110 140 158" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
+          <path d="M141 153 Q200 175 259 155" {...stitch} />
+          <path d="M199 186 V386" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="1.2" />
+          <path d="M153 386 H245" {...stitch} />
+        </>
+      )}
+
+      {shape === "hoodie" && side && (
+        <>
+          <g filter={`url(#${ds})`}>
+            <path d={HOOD_SIDE_HOOD} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+            <path d={HOOD_SIDE_BODY} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+            <path d={HOOD_SIDE_SLEEVE} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+          </g>
+          <g clipPath={`url(#${clip})`}>
+            <rect x="135" y="0" width="150" height="420" fill={`url(#${hl})`} />
+          </g>
+          <path d="M224 40 Q266 36 276 96" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1.5" />
+          <path d="M158 62 Q162 200 140 344" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1.2" />
+          <path d="M139 326 Q184 342 230 328 L230 348 Q184 362 138 346 Z" fill="rgba(0,0,0,0.1)" />
+          <path d="M140 328 Q184 344 230 330" {...stitch} />
+          <path d="M156 392 H260 V400 Q260 406 252 406 H164 Q156 406 156 400 Z" fill="rgba(0,0,0,0.08)" />
         </>
       )}
 
@@ -268,6 +328,7 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
         </>
       )}
 
+      </g>
     </svg>
   );
 }
@@ -281,9 +342,13 @@ type Spec = {
   extra?: ReactNode;
 };
 
-function specFor(shape: Shape, back: boolean): Spec {
+function specFor(shape: Shape, view: ViewKey): Spec {
+  const back = view === "back";
   switch (shape) {
     case "tee":
+      if (isSide(view)) {
+        return { x1: 138, x2: 262, edge: 0.13, folds: ["M156 72 Q170 120 150 156", "M196 220 Q220 290 202 360", "M232 96 Q248 130 250 156"] };
+      }
       return {
         x1: 20,
         x2: 380,
@@ -298,6 +363,9 @@ function specFor(shape: Shape, back: boolean): Spec {
         ],
       };
     case "hoodie":
+      if (isSide(view)) {
+        return { x1: 138, x2: 282, edge: 0.14, folds: ["M170 110 Q196 220 160 330", "M226 90 Q244 200 232 330", "M246 60 Q280 80 284 120"] };
+      }
       return {
         x1: 25,
         x2: 375,
@@ -305,8 +373,8 @@ function specFor(shape: Shape, back: boolean): Spec {
         folds: [
           "M114 205 Q140 255 120 325",
           "M286 215 Q262 262 282 340",
-          "M62 130 Q78 150 72 168",
-          "M338 130 Q322 150 328 168",
+          "M58 130 Q44 230 46 310",
+          "M342 130 Q356 230 354 310",
           ...(back ? ["M150 120 Q200 140 252 120"] : ["M150 86 Q200 108 250 86"]),
         ],
       };
@@ -328,8 +396,7 @@ function specFor(shape: Shape, back: boolean): Spec {
 // shading. Sits above print areas but never takes clicks.
 export function ProductShade({ shape, view }: Props) {
   const uid = useUid();
-  const back = view === "back";
-  const spec = specFor(shape, back);
+  const spec = specFor(shape, view);
   const clip = `${uid}-cp`;
   const edge = `${uid}-edge`;
   const vert = `${uid}-vert`;
@@ -339,7 +406,7 @@ export function ProductShade({ shape, view }: Props) {
   return (
     <svg className="stage-shade" viewBox="0 0 400 420" aria-hidden="true">
       <defs>
-        <Clip id={clip} d={outlines(shape, back)} />
+        <Clip id={clip} d={outlines(shape, view)} />
         <filter id={blur} x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="5" />
         </filter>
@@ -356,6 +423,7 @@ export function ProductShade({ shape, view }: Props) {
           <stop offset="1" stopColor="#000" stopOpacity="0.1" />
         </linearGradient>
       </defs>
+      <g transform={mirrorOf(view)}>
       <g clipPath={`url(#${clip})`}>
         <rect width="400" height="420" fill={`url(#${edge})`} />
         <rect width="400" height="420" fill={`url(#${vert})`} />
@@ -364,6 +432,7 @@ export function ProductShade({ shape, view }: Props) {
             <path key={d} d={d} />
           ))}
         </g>
+      </g>
       </g>
     </svg>
   );

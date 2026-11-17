@@ -1,11 +1,10 @@
 import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import ProductEditor from "@/components/product/ProductEditor";
-import type { DesignDTO, ProductDTO } from "@/components/product/types";
+import type { DesignDTO, ProductDTO, ViewKey } from "@/components/product/types";
 
 const getProduct = cache((slug: string) =>
   prisma.product.findFirst({
@@ -69,7 +68,7 @@ export default async function ProductPage({
       id: z.id,
       key: z.key,
       label: z.label,
-      view: z.view === "back" ? "back" : "front",
+      view: (["back", "left", "right"].includes(z.view) ? z.view : "front") as ViewKey,
       kind: z.kind,
       x: z.x,
       y: z.y,
@@ -90,16 +89,11 @@ export default async function ProductPage({
   };
 
   return (
-    <div className="container product-page">
-      <Link href="/#products" className="back-link">
-        Back to products
-      </Link>
-      <ProductEditor
-        product={dto}
-        loggedIn={!!session?.user}
-        catalog={catalog.map(toDesign)}
-        mine={mine.map(toDesign)}
-      />
-    </div>
+    <ProductEditor
+      product={dto}
+      loggedIn={!!session?.user}
+      catalog={catalog.map(toDesign)}
+      mine={mine.map(toDesign)}
+    />
   );
 }

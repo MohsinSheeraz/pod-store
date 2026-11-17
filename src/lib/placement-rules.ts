@@ -73,6 +73,10 @@ export function zoneProblem(zone: ZoneLike): string | null {
   }
 
   if (role === "left" || role === "right") {
+    // Side profiles are named for the wearer's side: the "left" view shows the left sleeve.
+    if (zone.view === "left" || zone.view === "right") {
+      return zone.view === role ? null : `${zone.label} is on the wrong side of the ${zone.view} view.`;
+    }
     const cx = x + w / 2;
     const wearerLeftIsScreenRight = zone.view !== "back";
     const wantsScreenRight = (role === "left") === wearerLeftIsScreenRight;
@@ -86,9 +90,9 @@ export function zoneProblem(zone: ZoneLike): string | null {
 export const usableZones = <T extends ZoneLike>(zones: T[]): T[] =>
   zones.filter((z) => zoneProblem(z) === null);
 
-/** Text goes only in text (monogram) zones, artwork only in image zones. */
-export const layerKindAllowed = (zone: Pick<ZoneLike, "kind">, kind: LayerKind) =>
-  zone.kind === "TEXT" ? kind === "text" : kind === "image";
+/** Every print area takes artwork and text; monograms just have a shorter text limit. */
+export const layerKindAllowed = (_zone: Pick<ZoneLike, "kind">, kind: LayerKind) =>
+  kind === "image" || kind === "text";
 
 export const zoneFrame = (zone: Pick<ZoneLike, "w" | "h">): Size => ({
   w: (zone.w / 100) * STAGE_W,
@@ -177,12 +181,36 @@ export function validatePlacement(
   if (problem) return problem;
 
   if (!layerKindAllowed(zone, spec.kind)) {
-    return `${zone.label} only takes ${zone.kind === "TEXT" ? "text" : "artwork"}.`;
+    return `${zone.label} does not take this kind of print.`;
   }
 
-  const unit = estimateUnitBox(zone, spec);
-  if (!isContained(p, unit, zoneFrame(zone), tol)) {
-    return `${zone.label}: the print must stay inside its print area.`;
+  // A print may be bigger than its area or hang over the edge: only what is inside the print
+  // area is printed. So there is no containment check, just sane numbers.
+  const nums = [p.x, p.y, p.scale, p.rotation];
+  if (nums.some((n) => typeof n !== "number" || !Number.isFinite(n))) {
+    return `${zone.label}: the placement is invalid.`;
+  }
+  if (p.scale < SCALE_MIN || p.scale > SCALE_MAX || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) {
+    return `${zone.label}: the placement is out of range.`;
+  }
+  void tol;
+  return null;
+}
+// ---- Areas that exclude each other ------------------------------------------------------------
+
+// The left-chest monogram sits on top of the front area, so a design goes either front centre or
+// on the monogram, never both.
+export const EXCLUSIVE_AREAS: string[][] = [["front", "monogram"]];
+
+/** The other areas that can't be used together with this one. */
+export const conflictsWith = (key: string): string[] =>
+  EXCLUSIVE_AREAS.flatMap((group) => (group.includes(key) ? group.filter((k) => k !== key) : []));
+
+/** An error message when the used print areas break an either-or rule, otherwise null. */
+export function exclusiveConflict(used: { key: string; label: string }[]): string | null {
+  for (const group of EXCLUSIVE_AREAS) {
+    const hit = used.filter((u) => group.includes(u.key));
+    if (hit.length > 1) return `Choose either ${hit.map((h) => h.label).join(" or ")}, not both.`;
   }
   return null;
 }

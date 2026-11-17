@@ -7,6 +7,7 @@ import {
   blockedReason,
   cartInclude,
   parseShipping,
+  TEST_PAYMENTS,
   toMoney,
   unitCents,
   variantLabel,
@@ -57,14 +58,14 @@ export async function POST(req: Request) {
 
       let totalCents = 0;
 
-      const lines: Prisma.OrderItemUncheckedCreateWithoutOrderInput[] = items.map((item) => {
+      const lines: Prisma.OrderItemCreateWithoutOrderInput[] = items.map((item) => {
         const { variant } = item;
         const { product } = variant;
         const unit = unitCents(item);
         totalCents += unit * item.quantity;
 
         return {
-          variantId: variant.id,
+          variant: { connect: { id: variant.id } },
           productName: product.name,
           variantLabel: variantLabel(item),
           shape: shapeFor(product.slug, product.category.slug),
@@ -72,21 +73,22 @@ export async function POST(req: Request) {
           quantity: item.quantity,
           unitPrice: toMoney(unit),
           prints: {
-            create: item.prints.map((p) => ({
+            create: item.prints.map((p, i) => ({
               zoneLabel: p.zone.label,
-              kind: p.zone.kind,
+              kind: p.text ? "TEXT" : "IMAGE",
               view: p.zone.view,
               zoneX: p.zone.x,
               zoneY: p.zone.y,
               zoneW: p.zone.w,
               zoneH: p.zone.h,
-              designId: p.designId,
+              design: p.designId ? { connect: { id: p.designId } } : undefined,
               designImageUrl: p.design?.imageUrl ?? null,
               text: p.text,
               font: p.font,
               color: p.color,
               placement: p.placement as Prisma.InputJsonValue,
-              fee: p.zone.fee,
+              // A print area is charged once, even when it holds a design and text.
+              fee: item.prints.findIndex((q) => q.zoneId === p.zoneId) === i ? p.zone.fee : 0,
             })),
           },
         };
@@ -94,8 +96,9 @@ export async function POST(req: Request) {
 
       const created = await tx.order.create({
         data: {
-          userId,
+          user: { connect: { id: userId } },
           total: toMoney(totalCents),
+          status: TEST_PAYMENTS ? "PAID" : "PENDING",
           shippingAddress: shipping.value,
           items: { create: lines },
         },
@@ -104,7 +107,7 @@ export async function POST(req: Request) {
       await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
 
       return created;
-    });
+    }, { maxWait: 10000, timeout: 20000 });
 
     return NextResponse.json({ id: order.id }, { status: 201 });
   } catch (error) {
@@ -112,6 +115,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     console.error("Checkout error:", error);
-    return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
+    // Show the cause while developing; keep it generic in production.
+    const detail = error instanceof Error ? error.message.trim().slice(-240) : "";
+    return NextResponse.json(
+      { error: process.env.NODE_ENV === "production" || !detail ? "Something went wrong." : `Something went wrong: ${detail}` },
+      { status: 500 }
+    );
   }
 }

@@ -1,21 +1,52 @@
-import type { FontKey, Placement } from "@/components/product/types";
+import type { FontKey, Placement, TextStyle } from "@/components/product/types";
 
 export const STAGE_W = 400;
 export const STAGE_H = 420;
 export const SCALE_MIN = 0.05;
-export const SCALE_MAX = 3;
+// A design can be sized freely: much bigger than its print area (it is clipped when printed)
+// or tiny.
+export const SCALE_MAX = 8;
 export const MIN_DPI = 150;
+// Monograms are initials; text on any other print area can be a short phrase.
 export const TEXT_MAX_LENGTH = 6;
+export const TEXT_MAX_FREE = 24;
+export const textLimit = (zone: { kind: string }) =>
+  zone.kind === "TEXT" ? TEXT_MAX_LENGTH : TEXT_MAX_FREE;
+export const DEFAULT_TEXT_STYLE: TextStyle = { curve: 0, bold: false, italic: false };
 // Text font size = scale * this many container-width percent units of the zone
 export const TEXT_BASE_CQW = 24;
 
-export const TEXT_FONTS: Record<FontKey, { label: string; css: string }> = {
-  sans: { label: "Sans", css: "var(--font-body), system-ui, sans-serif" },
-  display: { label: "Display", css: "var(--font-display), system-ui, sans-serif" },
-  serif: { label: "Serif", css: 'Georgia, "Times New Roman", serif' },
+export const TEXT_FONTS: Record<FontKey, { label: string; css: string; cssVar: string }> = {
+  sans: { label: "Clean", css: "var(--font-body), system-ui, sans-serif", cssVar: "--font-body" },
+  display: { label: "Display", css: "var(--font-display), system-ui, sans-serif", cssVar: "--font-display" },
+  serif: { label: "Playfair", css: "var(--font-playfair), Georgia, serif", cssVar: "--font-playfair" },
+  bebas: { label: "Bebas", css: "var(--font-bebas), Impact, sans-serif", cssVar: "--font-bebas" },
+  anton: { label: "Anton", css: "var(--font-anton), Impact, sans-serif", cssVar: "--font-anton" },
+  montserrat: { label: "Montserrat", css: "var(--font-montserrat), system-ui, sans-serif", cssVar: "--font-montserrat" },
+  abril: { label: "Abril", css: "var(--font-abril), Georgia, serif", cssVar: "--font-abril" },
+  pacifico: { label: "Pacifico", css: "var(--font-pacifico), cursive", cssVar: "--font-pacifico" },
+  lobster: { label: "Lobster", css: "var(--font-lobster), cursive", cssVar: "--font-lobster" },
+  marker: { label: "Marker", css: "var(--font-marker), cursive", cssVar: "--font-marker" },
+  caveat: { label: "Caveat", css: "var(--font-caveat), cursive", cssVar: "--font-caveat" },
+  typewriter: { label: "Typewriter", css: "var(--font-typewriter), 'Courier New', monospace", cssVar: "--font-typewriter" },
 };
 
-export const TEXT_COLORS = ["#14161B", "#FFFFFF", "#22305A", "#C9A227", "#B3261E"];
+export const FONT_KEYS = Object.keys(TEXT_FONTS) as FontKey[];
+
+export const TEXT_COLORS = [
+  "#14161B",
+  "#FFFFFF",
+  "#B3261E",
+  "#E4572E",
+  "#F2B84B",
+  "#C9A227",
+  "#2F6B4F",
+  "#2547F5",
+  "#22305A",
+  "#7B3FA0",
+  "#E87BA8",
+  "#9AA0AE",
+];
 
 export type Guides = { x: number | null; y: number | null };
 export const NO_GUIDES: Guides = { x: null, y: null };

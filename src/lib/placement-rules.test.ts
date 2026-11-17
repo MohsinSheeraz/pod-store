@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { SCALE_MAX } from "@/lib/placement";
 import {
   CONTAIN_TOLERANCE,
+  conflictsWith,
   constrainPlacement,
+  exclusiveConflict,
   estimateUnitBox,
   isContained,
   layerKindAllowed,
@@ -80,11 +83,11 @@ test("existing valid zones are preserved by usableZones", () => {
   );
 });
 
-test("text only goes in the monogram zone, artwork only in image zones", () => {
+test("every print area takes a design and text", () => {
   assert.equal(layerKindAllowed(teeMonogram, "text"), true);
-  assert.equal(layerKindAllowed(teeMonogram, "image"), false);
+  assert.equal(layerKindAllowed(teeMonogram, "image"), true);
   assert.equal(layerKindAllowed(teeFront, "image"), true);
-  assert.equal(layerKindAllowed(teeFront, "text"), false);
+  assert.equal(layerKindAllowed(teeFront, "text"), true);
 });
 
 test("validatePlacement accepts a monogram inside the left-chest zone", () => {
@@ -96,24 +99,37 @@ test("validatePlacement rejects a perfect placement in a center-garment monogram
   assert.match(err ?? "", /left chest/);
 });
 
-test("validatePlacement rejects text in an image zone and artwork in the monogram zone", () => {
-  assert.match(validatePlacement(teeFront, text3, centered) ?? "", /only takes artwork/);
-  assert.match(
-    validatePlacement(teeMonogram, { kind: "image", aspect: 1 }, centered) ?? "",
-    /only takes text/
-  );
+test("validatePlacement accepts text on a normal area and an image in the monogram", () => {
+  assert.equal(validatePlacement(teeFront, text3, centered), null);
+  assert.equal(validatePlacement(teeMonogram, { kind: "image", aspect: 1 }, centered), null);
 });
 
-test("validatePlacement rejects prints dragged outside the zone", () => {
-  const spec = { kind: "image", aspect: 1 } as const;
-  assert.match(validatePlacement(teeFront, spec, { x: 1, y: 0.5, scale: 0.5, rotation: 0 }) ?? "", /inside/);
-  assert.match(validatePlacement(teeFront, spec, { x: -0.2, y: 0.5, scale: 0.2, rotation: 0 }) ?? "", /inside/);
-  assert.match(validatePlacement(teeFront, spec, { x: 0.5, y: 1.4, scale: 0.2, rotation: 0 }) ?? "", /inside/);
+test("sleeves live on the side-profile views, matching the wearer's side", () => {
+  const left: ZoneLike = { ...leftSleeve, view: "left", x: 41, y: 20, w: 18, h: 16 };
+  const right: ZoneLike = { ...rightSleeve, view: "right", x: 41, y: 20, w: 18, h: 16 };
+  assert.equal(zoneProblem(left), null);
+  assert.equal(zoneProblem(right), null);
+  assert.match(zoneProblem({ ...left, view: "right" }) ?? "", /wrong side/);
+  assert.match(zoneProblem({ ...right, view: "left" }) ?? "", /wrong side/);
 });
 
-test("validatePlacement rejects oversized and NaN placements", () => {
+test("validatePlacement allows prints bigger than the area or hanging over its edge", () => {
   const spec = { kind: "image", aspect: 1 } as const;
-  assert.ok(validatePlacement(teeFront, spec, { x: 0.5, y: 0.5, scale: 3, rotation: 0 }));
+  assert.equal(validatePlacement(teeFront, spec, { x: 1, y: 0.5, scale: 0.5, rotation: 0 }), null);
+  assert.equal(validatePlacement(teeFront, spec, { x: 0.5, y: 0.5, scale: 3, rotation: 0 }), null);
+  assert.equal(validatePlacement(teeFront, spec, { x: 0.5, y: 0.5, scale: 0.06, rotation: 0 }), null);
+});
+
+test("validatePlacement still rejects centres off the area and absurd sizes", () => {
+  const spec = { kind: "image", aspect: 1 } as const;
+  assert.ok(validatePlacement(teeFront, spec, { x: -0.2, y: 0.5, scale: 0.2, rotation: 0 }));
+  assert.ok(validatePlacement(teeFront, spec, { x: 0.5, y: 1.4, scale: 0.2, rotation: 0 }));
+  assert.ok(validatePlacement(teeFront, spec, { x: 0.5, y: 0.5, scale: SCALE_MAX + 1, rotation: 0 }));
+  assert.ok(validatePlacement(teeFront, spec, { x: 0.5, y: 0.5, scale: 0.001, rotation: 0 }));
+});
+
+test("validatePlacement rejects NaN placements", () => {
+  const spec = { kind: "image", aspect: 1 } as const;
   assert.ok(validatePlacement(teeFront, spec, { x: Number.NaN, y: 0.5, scale: 0.5, rotation: 0 }));
   assert.ok(validatePlacement(teeFront, spec, { x: 0.5, y: 0.5, scale: Number.NaN, rotation: 0 }));
 });
@@ -178,11 +194,24 @@ test("an unmeasured layer is left alone", () => {
   assert.equal(constrainPlacement(p, { w: 0, h: 0 }, { w: 100, h: 100 }), p);
 });
 
-test("a monogram sized for the zone stays valid, one that is too wide is rejected", () => {
+test("a monogram may be sized past its area; scaleLimit still reports what fits", () => {
   const frame = zoneFrame(teeMonogram);
   const unit = estimateUnitBox(teeMonogram, text3);
   const limit = scaleLimit(unit, 0, frame);
   assert.ok(limit > 0.1);
   assert.equal(validatePlacement(teeMonogram, text3, { ...centered, scale: limit * 0.95 }), null);
-  assert.ok(validatePlacement(teeMonogram, text3, { ...centered, scale: limit * 1.5 }));
+  assert.equal(validatePlacement(teeMonogram, text3, { ...centered, scale: limit * 1.5 }), null);
+});
+test("front and the left-chest monogram are either-or", () => {
+  assert.deepEqual(conflictsWith("front"), ["monogram"]);
+  assert.deepEqual(conflictsWith("monogram"), ["front"]);
+  assert.deepEqual(conflictsWith("back"), []);
+  assert.equal(exclusiveConflict([{ key: "front", label: "Front" }, { key: "back", label: "Back" }]), null);
+  assert.match(
+    exclusiveConflict([
+      { key: "front", label: "Front" },
+      { key: "monogram", label: "Left chest monogram" },
+    ]) ?? "",
+    /either Front or Left chest monogram/
+  );
 });

@@ -1,11 +1,21 @@
-import type { CSSProperties } from "react";
-import { TEXT_BASE_CQW, TEXT_FONTS } from "@/lib/placement";
-import type { FontKey, Placement } from "@/components/product/types";
+"use client";
 
-// Everything needed to draw one print layer, on the editor canvas or in the cart.
+import { useEffect, useId, useState, type CSSProperties } from "react";
+import { TEXT_BASE_CQW, TEXT_FONTS } from "@/lib/placement";
+import { curveGeometry, ensureFont, measureText, textWeight } from "@/lib/text-metrics";
+import type { FontKey, Placement, TextStyle } from "@/components/product/types";
+
+// Everything needed to draw one print layer, on the editor canvas, in the cart or on an order.
 export type LayerRender =
   | { kind: "image"; imageUrl: string; placement: Placement }
-  | { kind: "text"; text: string; font: FontKey; color: string; placement: Placement };
+  | {
+      kind: "text";
+      text: string;
+      font: FontKey;
+      color: string;
+      style: TextStyle;
+      placement: Placement;
+    };
 
 function positionStyle(p: Placement): CSSProperties {
   return {
@@ -14,6 +24,82 @@ function positionStyle(p: Placement): CSSProperties {
     top: `${p.y * 100}%`,
     transform: `translate(-50%, -50%) rotate(${p.rotation}deg)`,
   };
+}
+
+// Text width at a 100px font. Starts as an estimate and is corrected once the font loads.
+function useTextWidth(text: string, font: FontKey, bold: boolean, italic: boolean) {
+  const [width, setWidth] = useState(() => text.length * 55);
+  useEffect(() => {
+    let live = true;
+    void ensureFont(font, bold, italic, text).then(() => {
+      if (live) setWidth(measureText(text, font, bold, italic));
+    });
+    return () => {
+      live = false;
+    };
+  }, [text, font, bold, italic]);
+  return width;
+}
+
+function TextLayerView({
+  layer,
+  innerRef,
+}: {
+  layer: Extract<LayerRender, { kind: "text" }>;
+  innerRef?: (el: HTMLElement | null) => void;
+}) {
+  const { text, font, color, style, placement } = layer;
+  const id = useId();
+  const len = useTextWidth(text, font, style.bold, style.italic);
+  const fontCqw = placement.scale * TEXT_BASE_CQW;
+  const family = TEXT_FONTS[font]?.css ?? TEXT_FONTS.sans.css;
+  const weight = textWeight(style.bold);
+  const fontStyle = style.italic ? "italic" : "normal";
+
+  if (!style.curve) {
+    return (
+      <span
+        ref={innerRef}
+        style={{
+          ...positionStyle(placement),
+          fontFamily: family,
+          fontSize: `${fontCqw}cqw`,
+          fontWeight: weight,
+          fontStyle,
+          color,
+          lineHeight: 1,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {text}
+      </span>
+    );
+  }
+
+  const g = curveGeometry(len, style.curve);
+  const widthCqw = (g.box.w * fontCqw) / 100;
+  return (
+    <span ref={innerRef} style={{ ...positionStyle(placement), display: "block", width: `${widthCqw}cqw` }}>
+      <svg
+        viewBox={`${g.box.x} ${g.box.y} ${g.box.w} ${g.box.h}`}
+        style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}
+        aria-label={text}
+      >
+        <path id={`${id}-p`} d={g.d} fill="none" />
+        <text
+          fill={color}
+          fontSize="100"
+          fontWeight={weight}
+          fontStyle={fontStyle}
+          style={{ fontFamily: family }}
+        >
+          <textPath href={`#${id}-p`} startOffset="50%" textAnchor="middle">
+            {text}
+          </textPath>
+        </text>
+      </svg>
+    </span>
+  );
 }
 
 // Must sit inside an element with container-type: inline-size (.zone-clip / .zone-ghost),
@@ -43,21 +129,5 @@ export default function LayerView({
       />
     );
   }
-
-  return (
-    <span
-      ref={innerRef}
-      style={{
-        ...positionStyle(layer.placement),
-        fontFamily: TEXT_FONTS[layer.font]?.css ?? TEXT_FONTS.sans.css,
-        fontSize: `${layer.placement.scale * TEXT_BASE_CQW}cqw`,
-        color: layer.color,
-        fontWeight: 600,
-        lineHeight: 1,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {layer.text}
-    </span>
-  );
+  return <TextLayerView layer={layer} innerRef={innerRef} />;
 }

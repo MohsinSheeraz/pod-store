@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { formatMoney } from "@/lib/format";
-import { asFont, asPlacement } from "@/lib/cart";
+import { asFont, asPlacement, asTextStyle } from "@/lib/cart";
 import { shapeFor } from "@/components/product/ProductSilhouette";
 import PrintPreview, { type PreviewZone } from "@/components/product/PrintPreview";
 import CartItemControls from "@/components/cart/CartItemControls";
@@ -37,16 +37,19 @@ export default async function CartPage() {
     const unitPrice =
       Number(product.basePrice) +
       Number(variant.priceDelta) +
-      item.prints.reduce((sum, p) => sum + Number(p.zone.fee), 0);
+      [...new Map(item.prints.map((p) => [p.zoneId, Number(p.zone.fee)])).values()].reduce(
+        (sum, f) => sum + f,
+        0
+      );
 
-    const previews = (["front", "back"] as ViewKey[])
+    const previews = (["front", "back", "left", "right"] as ViewKey[])
       .map((view) => {
         const zones: PreviewZone[] = [];
         for (const p of item.prints) {
           if (p.zone.view !== view) continue;
           const placement = asPlacement(p.placement);
           const base = { id: p.id, x: p.zone.x, y: p.zone.y, w: p.zone.w, h: p.zone.h };
-          if (p.zone.kind === "TEXT" && p.text) {
+          if (p.text) {
             zones.push({
               ...base,
               layer: {
@@ -54,6 +57,7 @@ export default async function CartPage() {
                 text: p.text,
                 font: asFont(p.font),
                 color: p.color ?? "#14161B",
+                style: asTextStyle(p.placement),
                 placement,
               },
             });
@@ -84,8 +88,8 @@ export default async function CartPage() {
       prints: item.prints.map((p) => ({
         id: p.id,
         label: p.zone.label,
-        detail: p.zone.kind === "TEXT" ? `“${p.text ?? ""}”` : (p.design?.name ?? "Artwork removed"),
-        fee: Number(p.zone.fee),
+        detail: p.text ? `“${p.text}”` : (p.design?.name ?? "Artwork removed"),
+        fee: item.prints.findIndex((q) => q.zoneId === p.zoneId) === item.prints.indexOf(p) ? Number(p.zone.fee) : 0,
       })),
       previews,
     };

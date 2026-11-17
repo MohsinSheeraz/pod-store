@@ -148,7 +148,7 @@ model CartItemPrint {
   // { x, y, scale, rotation } relative to the zone
   placement  Json
 
-  @@unique([cartItemId, zoneId])
+  @@index([cartItemId, zoneId])
 }
 
 model Order {

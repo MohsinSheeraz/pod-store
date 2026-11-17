@@ -3,11 +3,11 @@ import { open } from "fs/promises";
 import path from "path";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { TEXT_MAX_LENGTH } from "@/lib/placement";
-import { validatePlacement, type LayerSpec } from "@/lib/placement-rules";
+import { FONT_KEYS, SCALE_MAX, SCALE_MIN, textLimit } from "@/lib/placement";
+import { exclusiveConflict, validatePlacement, type LayerSpec } from "@/lib/placement-rules";
 import { readImageSize } from "@/lib/image-size";
 
-const FONTS = ["sans", "display", "serif"];
+const FONTS: string[] = FONT_KEYS;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 
@@ -20,7 +20,7 @@ const validPlacement = (p: unknown) => {
     !!pl &&
     inRange(pl.x, 0, 1) &&
     inRange(pl.y, 0, 1) &&
-    inRange(pl.scale, 0.05, 3) &&
+    inRange(pl.scale, SCALE_MIN, SCALE_MAX) &&
     inRange(pl.rotation, -180, 180)
   );
 };
@@ -51,6 +51,7 @@ type PrintInput = {
   text?: unknown;
   font?: unknown;
   color?: unknown;
+  textStyle?: unknown;
   placement?: unknown;
 };
 
@@ -95,16 +96,18 @@ export async function POST(req: Request) {
     text?: string;
     font?: string;
     color?: string;
-    placement: { x: number; y: number; scale: number; rotation: number };
+    placement: Record<string, number | boolean>;
   }[] = [];
-  const seenZones = new Set<string>();
+  // A print area can hold one design and one line of text.
+  const seen = new Set<string>();
 
   for (const raw of prints as PrintInput[]) {
     const zone = variant.product.zones.find((z) => z.id === raw?.zoneId);
-    if (!zone || seenZones.has(zone.id)) {
+    const isText = typeof raw?.designId !== "string";
+    if (!zone || seen.has(`${zone.id}:${isText}`)) {
       return NextResponse.json({ error: "Invalid print area." }, { status: 400 });
     }
-    seenZones.add(zone.id);
+    seen.add(`${zone.id}:${isText}`);
 
     if (!validPlacement(raw.placement)) {
       return NextResponse.json({ error: "Artwork placement is invalid." }, { status: 400 });
@@ -112,37 +115,11 @@ export async function POST(req: Request) {
     const p = raw.placement as { x: number; y: number; scale: number; rotation: number };
     const placement = { x: p.x, y: p.y, scale: p.scale, rotation: p.rotation };
 
-    if (zone.kind === "TEXT") {
-      if (raw.designId !== undefined) {
-        return NextResponse.json({ error: `${zone.label} takes text, not artwork.` }, { status: 400 });
-      }
-      const text = typeof raw.text === "string" ? raw.text.trim() : "";
-      if (!text || text.length > TEXT_MAX_LENGTH) {
-        return NextResponse.json(
-          { error: `Text must be 1 to ${TEXT_MAX_LENGTH} characters.` },
-          { status: 400 }
-        );
-      }
-      if (typeof raw.font !== "string" || !FONTS.includes(raw.font)) {
-        return NextResponse.json({ error: "Invalid font." }, { status: 400 });
-      }
-      if (typeof raw.color !== "string" || !HEX.test(raw.color)) {
-        return NextResponse.json({ error: "Invalid text color." }, { status: 400 });
-      }
-
-      // Monograms: only in the left-chest zone, and fully inside it.
-      const spec: LayerSpec = { kind: "text", chars: text.length };
-      const placementError = validatePlacement(zone, spec, placement);
-      if (placementError) {
-        return NextResponse.json({ error: placementError }, { status: 400 });
-      }
-      data.push({ zoneId: zone.id, text, font: raw.font, color: raw.color, placement });
-    } else {
+    // A print is either artwork (designId) or initials (text). Monogram zones take both;
+    // every other zone takes artwork only.
+    if (typeof raw.designId === "string") {
       if (raw.text !== undefined) {
-        return NextResponse.json({ error: `${zone.label} takes artwork, not text.` }, { status: 400 });
-      }
-      if (typeof raw.designId !== "string") {
-        return NextResponse.json({ error: "Add artwork to this print area." }, { status: 400 });
+        return NextResponse.json({ error: "Choose artwork or text, not both." }, { status: 400 });
       }
       const design = await prisma.design.findUnique({ where: { id: raw.designId } });
       if (!design || (!design.isCatalog && design.ownerId !== session.user.id)) {
@@ -155,7 +132,56 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: placementError }, { status: 400 });
       }
       data.push({ zoneId: zone.id, designId: design.id, placement });
+    } else if (raw.text !== undefined) {
+      const text = typeof raw.text === "string" ? raw.text.trim() : "";
+      const max = textLimit(zone);
+      if (!text || text.length > max) {
+        return NextResponse.json({ error: `Text must be 1 to ${max} characters.` }, { status: 400 });
+      }
+      const st = (raw.textStyle ?? {}) as Record<string, unknown>;
+      if (
+        (st.curve !== undefined && !inRange(st.curve, -100, 100)) ||
+        (st.bold !== undefined && typeof st.bold !== "boolean") ||
+        (st.italic !== undefined && typeof st.italic !== "boolean")
+      ) {
+        return NextResponse.json({ error: "Invalid text style." }, { status: 400 });
+      }
+      if (typeof raw.font !== "string" || !FONTS.includes(raw.font)) {
+        return NextResponse.json({ error: "Invalid font." }, { status: 400 });
+      }
+      if (typeof raw.color !== "string" || !HEX.test(raw.color)) {
+        return NextResponse.json({ error: "Invalid text color." }, { status: 400 });
+      }
+
+      const spec: LayerSpec = { kind: "text", chars: text.length };
+      const placementError = validatePlacement(zone, spec, placement);
+      if (placementError) {
+        return NextResponse.json({ error: placementError }, { status: 400 });
+      }
+      data.push({
+        zoneId: zone.id,
+        text,
+        font: raw.font,
+        color: raw.color,
+        placement: {
+          ...placement,
+          curve: typeof st.curve === "number" ? st.curve : 0,
+          bold: st.bold === true,
+          italic: st.italic === true,
+        },
+      });
+    } else {
+      return NextResponse.json({ error: "Add artwork to this print area." }, { status: 400 });
     }
+  }
+
+  const usedZones = [...new Set(data.map((d) => d.zoneId))].flatMap((id) => {
+    const z = variant.product.zones.find((zone) => zone.id === id);
+    return z ? [{ key: z.key, label: z.label }] : [];
+  });
+  const conflict = exclusiveConflict(usedZones);
+  if (conflict) {
+    return NextResponse.json({ error: conflict }, { status: 400 });
   }
 
   const cart = await prisma.cart.upsert({

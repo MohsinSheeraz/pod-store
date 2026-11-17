@@ -4,6 +4,7 @@ import { Bricolage_Grotesque, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 import Providers from "@/components/layout/Providers";
 import { SITE } from "@/lib/site";
+import { fontVariables } from "@/lib/fonts";
 
 const display = Bricolage_Grotesque({
   variable: "--font-display",
@@ -20,9 +21,19 @@ export const metadata: Metadata = {
   description: SITE.description,
 };
 
+// Sets the saved (or the system) theme before first paint, so there is no flash of the wrong one.
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("theme");if(!t){t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.dataset.theme=t}catch(e){}})()`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable}`}>
+    <html
+      lang="en"
+      className={`${display.variable} ${body.variable} ${fontVariables}`}
+      suppressHydrationWarning
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <Providers>{children}</Providers>
       </body>

@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 type SeedZone = {
   key: string;
   label: string;
-  view: "front" | "back";
+  view: "front" | "back" | "left" | "right";
   kind?: "IMAGE" | "TEXT";
   x: number;
   y: number;
@@ -44,21 +44,22 @@ const tshirtSizes = [
 ];
 
 // Fees: back +4, sleeve +2.50, monogram +3. Change them here.
-// Monogram is a left-chest print: it sits on the wearer's left (right-hand side of the front
-// view) and only takes text. See src/lib/placement-rules.ts.
+// Sleeves print on the side-profile views ("left" / "right"). The monogram is a left-chest print:
+// it sits on the wearer's left (right-hand side of the front view) and takes initials or an
+// image. See src/lib/placement-rules.ts.
 const teeZones: SeedZone[] = [
   { key: "front", label: "Front", view: "front", x: 28, y: 27, w: 44, h: 42, widthIn: 12, heightIn: 14 },
   { key: "back", label: "Back", view: "back", x: 27, y: 22, w: 46, h: 46, widthIn: 12, heightIn: 14, fee: 4 },
-  { key: "right-sleeve", label: "Right sleeve", view: "front", x: 8.5, y: 22, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
-  { key: "left-sleeve", label: "Left sleeve", view: "front", x: 82.5, y: 22, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "left-sleeve", label: "Left sleeve", view: "left", x: 41, y: 20, w: 18, h: 16, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "right-sleeve", label: "Right sleeve", view: "right", x: 41, y: 20, w: 18, h: 16, widthIn: 3, heightIn: 3, fee: 2.5 },
   { key: "monogram", label: "Left chest monogram", view: "front", kind: "TEXT", x: 54, y: 22, w: 14, h: 13, widthIn: 3.5, heightIn: 3.4, fee: 3 },
 ];
 
 const hoodieZones: SeedZone[] = [
-  { key: "front", label: "Front", view: "front", x: 30, y: 38, w: 40, h: 32, widthIn: 11, heightIn: 12 },
+  { key: "front", label: "Front", view: "front", x: 30, y: 34, w: 40, h: 32, widthIn: 11, heightIn: 12 },
   { key: "back", label: "Back", view: "back", x: 28, y: 26, w: 44, h: 46, widthIn: 12, heightIn: 14, fee: 4.5 },
-  { key: "right-sleeve", label: "Right sleeve", view: "front", x: 10.5, y: 27, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
-  { key: "left-sleeve", label: "Left sleeve", view: "front", x: 80.5, y: 27, w: 9, h: 8.5, widthIn: 3, heightIn: 3, fee: 2.5 },
+  { key: "left-sleeve", label: "Left sleeve", view: "left", x: 43, y: 24, w: 14, h: 15, widthIn: 3, heightIn: 3.2, fee: 2.5 },
+  { key: "right-sleeve", label: "Right sleeve", view: "right", x: 43, y: 24, w: 14, h: 15, widthIn: 3, heightIn: 3.2, fee: 2.5 },
   { key: "monogram", label: "Left chest monogram", view: "front", kind: "TEXT", x: 55, y: 28, w: 13, h: 12, widthIn: 3.2, heightIn: 3.3, fee: 3 },
 ];
 

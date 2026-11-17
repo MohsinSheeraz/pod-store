@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { formatMoney } from "@/lib/format";
 import HeroMockup from "@/components/home/HeroMockup";
+import ProductTile from "@/components/home/ProductTile";
 
 const STEPS = [
   {
@@ -10,11 +10,11 @@ const STEPS = [
   },
   {
     title: "Add your artwork",
-    body: "Upload a file or choose from the catalog, then move and resize it on the product.",
+    body: "Upload a file or choose from the catalog, add text, then move and resize it on the product.",
   },
   {
     title: "We print and ship",
-    body: "Your order is printed after you place it and shipped straight to you.",
+    body: "See it on a model first. Your order is printed after you place it and shipped straight to you.",
   },
 ];
 
@@ -30,28 +30,46 @@ export default async function HomePage() {
       <section className="hero">
         <div className="container hero-grid">
           <div className="hero-copy">
-            <h1 className="hero-title">Your artwork, printed on demand.</h1>
+            <span className="eyebrow">
+              <i className="eyebrow-dot" /> See it on a real model before you order
+            </span>
+            <h1 className="hero-title">
+              Your artwork, <span className="grad-text">printed</span> on demand.
+            </h1>
             <p className="hero-lede">
-              Choose a product, add your design, and we print it when you order. No minimums, no
-              stock to buy.
+              Choose a product, add your design or your words, and we print it when you order. No
+              minimums, no stock to buy.
             </p>
             <div className="hero-actions">
-              <Link href="/#products" className="btn btn-primary btn-lg">
-                Browse products
+              <Link href="/#products" className="btn btn-glow btn-lg">
+                Start designing →
               </Link>
               <Link href="/#how" className="btn btn-ghost btn-lg">
                 How it works
               </Link>
             </div>
           </div>
-          <HeroMockup />
+
+          <div className="hero-visual">
+            <span className="float-chip float-chip-a">
+              <b>✦</b> No minimums
+            </span>
+            <span className="float-chip float-chip-b">
+              <b>★</b> Live model previews
+            </span>
+            <span className="float-chip float-chip-c">
+              <b>↗</b> Ships worldwide
+            </span>
+            <HeroMockup />
+          </div>
         </div>
       </section>
 
       <section id="products" className="section">
         <div className="container">
-          <div className="section-head">
-            <h2>Products</h2>
+          <div className="section-head reveal">
+            <span className="kicker">The lineup</span>
+            <h2>Pick your canvas.</h2>
             <p>Start from a blank and make it yours.</p>
           </div>
 
@@ -62,21 +80,15 @@ export default async function HomePage() {
           ) : (
             <div className="product-grid">
               {products.map((p) => (
-                <Link key={p.id} href={`/products/${p.slug}`} className="product-tile">
-                  <div className="tile-art">
-                    {p.imageUrl ? (
-                      <img src={p.imageUrl} alt={p.name} />
-                    ) : (
-                      <span className="tile-placeholder">{p.name}</span>
-                    )}
-                  </div>
-                  <div className="tile-body">
-                    <h3>{p.name}</h3>
-                    <p>
-                      {p.category.name} · From {formatMoney(p.basePrice)}
-                    </p>
-                  </div>
-                </Link>
+                <div key={p.id} className="reveal">
+                  <ProductTile
+                    slug={p.slug}
+                    name={p.name}
+                    categorySlug={p.category.slug}
+                    categoryName={p.category.name}
+                    price={Number(p.basePrice)}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -85,13 +97,14 @@ export default async function HomePage() {
 
       <section id="how" className="section section-alt">
         <div className="container">
-          <div className="section-head">
-            <h2>How it works</h2>
+          <div className="section-head reveal">
+            <span className="kicker">Three steps</span>
+            <h2>From idea to doorstep.</h2>
           </div>
           <ol className="steps">
             {STEPS.map((s, i) => (
-              <li key={s.title} className="step">
-                <span className="step-number">{i + 1}</span>
+              <li key={s.title} className="how-step reveal">
+                <span className="how-num">0{i + 1}</span>
                 <h3>{s.title}</h3>
                 <p>{s.body}</p>
               </li>
