@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { shippingNote } from "@/lib/shipping-note";
 import ProductEditor from "@/components/product/ProductEditor";
 import type { DesignDTO, ProductDTO, ViewKey } from "@/components/product/types";
 
@@ -25,7 +26,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const product = await getProduct(slug);
   return {
-    title: product?.name ?? "Product",
+    title: product ? `Design your ${product.name}` : "Product",
     description: product ? `${product.description} Design it yourself and preview it on a model.` : undefined,
     openGraph: product ? { title: product.name, description: product.description } : undefined,
   };
@@ -33,10 +34,13 @@ export async function generateMetadata({
 
 export default async function ProductPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ color?: string }>;
 }) {
   const { slug } = await params;
+  const { color } = await searchParams;
   const [product, session] = await Promise.all([getProduct(slug), auth()]);
   const userId = session?.user?.id;
 
@@ -98,6 +102,8 @@ export default async function ProductPage({
       loggedIn={!!session?.user}
       catalog={catalog.map(toDesign)}
       mine={mine.map(toDesign)}
+      shippingNote={shippingNote()}
+      initialColor={color}
     />
   );
 }

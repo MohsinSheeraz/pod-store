@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -29,6 +29,7 @@ import {
 import ProductSilhouette, { ProductShade, shapeFor } from "@/components/product/ProductSilhouette";
 import ZoneFrame, { toRender } from "@/components/product/ZoneFrame";
 import TextPanel from "@/components/product/TextPanel";
+import ProductDetails from "@/components/product/ProductDetails";
 import DesignPicker from "@/components/product/DesignPicker";
 import MockupModal from "@/components/product/MockupModal";
 import type { ExportZone } from "@/lib/mockup-export";
@@ -83,9 +84,13 @@ type Props = {
   // Ready-made designs, and the shopper's own earlier uploads
   catalog: DesignDTO[];
   mine: DesignDTO[];
+  // e.g. "Shipping is $4.99, free over $75." (built on the server from the real settings)
+  shippingNote: string;
+  // colour chosen on the product page
+  initialColor?: string;
 };
 
-export default function ProductEditor({ product, loggedIn, catalog, mine }: Props) {
+export default function ProductEditor({ product, loggedIn, catalog, mine, shippingNote, initialColor }: Props) {
   // Only offer print areas whose position follows the product's placement rules.
   const zones = useMemo(() => usableZones(product.zones), [product.zones]);
 
@@ -102,14 +107,26 @@ export default function ProductEditor({ product, loggedIn, catalog, mine }: Prop
     );
   }
 
-  return <Customizer product={{ ...product, zones }} loggedIn={loggedIn} catalog={catalog} mine={mine} />;
+  return (
+    <Customizer
+      product={{ ...product, zones }}
+      loggedIn={loggedIn}
+      catalog={catalog}
+      mine={mine}
+      shippingNote={shippingNote}
+      initialColor={initialColor}
+    />
+  );
 }
 
-function Customizer({ product, loggedIn, catalog, mine }: Props) {
+function Customizer({ product, loggedIn, catalog, mine, shippingNote, initialColor }: Props) {
   const router = useRouter();
   const zones = product.zones;
 
-  const firstVariant = product.variants.find((v) => v.available) ?? product.variants[0];
+  const firstVariant =
+    product.variants.find((v) => v.available && v.color === initialColor) ??
+    product.variants.find((v) => v.available) ??
+    product.variants[0];
   const [color, setColor] = useState(firstVariant.color);
   const [size, setSize] = useState(firstVariant.size);
   const [quantity, setQuantity] = useState(1);
@@ -454,6 +471,11 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
       }
 
       setAdded(true);
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        /* ignore */
+      }
       router.refresh();
     } catch {
       setCartError("Could not reach the server. Your design is still here. Try again.");
@@ -521,12 +543,135 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
 
   const isApparel = shape === "tee" || shape === "hoodie";
 
+  // ---- Undo / redo ---------------------------------------------------------------------------
+  // Snapshots of the layers, taken once changes settle (not on every step of a drag).
+  const history = useRef<{ stack: Record<string, Layer>[]; index: number }>({ stack: [{}], index: 0 });
+  const [canStep, setCanStep] = useState({ undo: false, redo: false });
+
+  const syncCanStep = () => {
+    const h = history.current;
+    setCanStep({ undo: h.index > 0, redo: h.index < h.stack.length - 1 });
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const h = history.current;
+      if (JSON.stringify(layers) === JSON.stringify(h.stack[h.index])) return;
+      h.stack = [...h.stack.slice(0, h.index + 1), layers].slice(-60);
+      h.index = h.stack.length - 1;
+      setCanStep({ undo: h.index > 0, redo: false });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [layers]);
+
+  function stepHistory(dir: -1 | 1) {
+    const h = history.current;
+    const next = h.index + dir;
+    if (next < 0 || next >= h.stack.length) return;
+    h.index = next;
+    setLayers(h.stack[next]);
+    setMetricsMap({});
+    setAdded(false);
+    syncCanStep();
+  }
+
+  // Ctrl/Cmd+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes (unless you are typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        e.preventDefault();
+        stepHistory(e.shiftKey ? 1 : -1);
+      } else if (k === "y") {
+        e.preventDefault();
+        stepHistory(1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // ---- Draft: the design is kept in this browser, so a refresh doesn't lose it -----------------
+  const draftKey = `pressroom-draft:${product.slug}`;
+  const draftReady = useRef(false);
+
+  useEffect(() => {
+    // After the first paint, so the server and browser render the same thing first.
+    const t = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem(draftKey);
+        if (raw) {
+          const d = JSON.parse(raw) as { color?: string; size?: string; layers?: Record<string, Layer> };
+          const valid: Record<string, Layer> = {};
+          for (const [key, l] of Object.entries(d.layers ?? {})) {
+            const [zoneKey, kind] = key.split(":");
+            if (!zones.some((z) => z.key === zoneKey) || (kind !== "image" && kind !== "text")) continue;
+            if (l.kind === "image" && l.design?.imageUrl) {
+              valid[key] = { ...l, pixelW: l.pixelW === -1 ? Infinity : l.pixelW }; // -1 = vector art
+            } else if (l.kind === "text" && typeof l.text === "string") {
+              valid[key] = l;
+            }
+          }
+          if (Object.keys(valid).length > 0) {
+            setLayers(valid);
+            if (d.color && colors.some((c) => c.name === d.color)) setColor(d.color);
+            if (d.size && product.variants.some((v) => v.size === d.size)) setSize(d.size);
+            toast(
+              (t2) => (
+                <span className="draft-toast">
+                  Restored your last design.{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearAll();
+                      toast.dismiss(t2.id);
+                    }}
+                  >
+                    Start over
+                  </button>
+                </span>
+              ),
+              { duration: 7000 }
+            );
+          }
+        }
+      } catch {
+        /* a damaged or blocked draft is simply ignored */
+      }
+      draftReady.current = true;
+    }, 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftReady.current) return;
+    const t = setTimeout(() => {
+      try {
+        if (Object.keys(layers).length === 0) {
+          localStorage.removeItem(draftKey);
+        } else {
+          localStorage.setItem(
+            draftKey,
+            JSON.stringify({ color, size, layers }, (_k, v) => (v === Infinity ? -1 : v))
+          );
+        }
+      } catch {
+        /* storage full or blocked: not critical */
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [layers, color, size, draftKey]);
+
   return (
     <div className={collapsed ? "editor-shell is-collapsed" : "editor-shell"}>
       <aside className="editor-sidebar" id="editor-sidebar" aria-label="Customize product" aria-hidden={collapsed}>
         <div className="sidebar-head">
-          <Link href="/#products" className="back-link">
-            ← Products
+          <Link href={`/products/${product.slug}`} className="back-link">
+            ← Product page
           </Link>
           <button
             type="button"
@@ -696,6 +841,8 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
           <QtyStepper value={quantity} onChange={(n) => setQuantity(clamp(n, 1, 20))} />
         </div>
 
+        <ProductDetails product={product} shippingNote={shippingNote} />
+
         </div>
 
         <div className="sidebar-foot editor-buy">
@@ -755,6 +902,34 @@ function Customizer({ product, loggedIn, catalog, mine }: Props) {
               ☰ Customize
             </button>
           )}
+          <div className="history-btns" role="group" aria-label="Undo and redo">
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm"
+              onClick={() => stepHistory(-1)}
+              disabled={!canStep.undo}
+              aria-label="Undo"
+              title="Undo (Ctrl+Z)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 14 4 9l5-5" />
+                <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm"
+              onClick={() => stepHistory(1)}
+              disabled={!canStep.redo}
+              aria-label="Redo"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 14 5-5-5-5" />
+                <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+              </svg>
+            </button>
+          </div>
           <p className="canvas-note">{isApparel ? VIEW_NOTE[view] : activeZone.label}</p>
 
           {activeLayer ? (

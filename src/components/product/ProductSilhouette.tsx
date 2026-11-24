@@ -27,11 +27,11 @@ const EDGE = "rgba(0,0,0,0.14)";
 const DARK = "rgba(0,0,0,0.18)";
 
 const teePath = (neck: number) =>
-  `M130 30 L90 45 L20 95 L55 150 L95 125 L95 385 Q95 395 105 395 L295 395 Q305 395 305 385 L305 125 L345 150 L380 95 L310 45 L270 30 Q250 ${neck} 200 ${neck} Q150 ${neck} 130 30 Z`;
+  `M130 30 Q108 36 90 46 Q52 66 20 95 L55 150 L95 125 L95 385 Q95 395 105 395 L295 395 Q305 395 305 385 L305 125 L345 150 L380 95 Q348 66 310 46 Q292 36 270 30 Q250 ${neck} 200 ${neck} Q150 ${neck} 130 30 Z`;
 
 // Full-length sleeves hang down beside the body, as on a real hoodie.
 const hoodiePath = (neck: number) =>
-  `M135 40 L95 55 L45 95 Q22 200 20 330 L62 338 Q70 250 95 190 L95 390 Q95 400 105 400 L295 400 Q305 400 305 390 L305 190 Q330 250 338 338 L380 330 Q378 200 355 95 L305 55 L265 40 Q250 ${neck} 200 ${neck} Q150 ${neck} 135 40 Z`;
+  `M135 40 Q105 46 88 62 Q56 80 44 112 Q22 205 20 330 L62 338 Q70 252 95 192 L95 390 Q95 400 105 400 L295 400 Q305 400 305 390 L305 192 Q330 252 338 338 L380 330 Q378 205 356 112 Q344 80 312 62 Q295 46 265 40 Q250 ${neck} 200 ${neck} Q150 ${neck} 135 40 Z`;
 
 // Side profiles (wearer's left; the right view is this mirrored). Front of the garment faces left.
 const TEE_SIDE_BODY = "M151 58 Q163 36 198 34 Q233 36 243 60 L247 392 Q247 398 239 398 L159 398 Q151 398 151 392 Z";
@@ -97,6 +97,174 @@ function Clip({ id, d }: { id: string; d: string[] }) {
   );
 }
 
+
+// Rib lines between two edges (used for cuffs and the hem band).
+function ribLines(from: [number, number], to: [number, number], from2: [number, number], to2: [number, number], n: number) {
+  return Array.from({ length: n }, (_, i) => {
+    const t = (i + 1) / (n + 1);
+    const lerp = (a: number, b: number) => a + (b - a) * t;
+    return `M${lerp(from[0], to[0]).toFixed(1)} ${lerp(from[1], to[1]).toFixed(1)} L${lerp(from2[0], to2[0]).toFixed(1)} ${lerp(from2[1], to2[1]).toFixed(1)}`;
+  }).join(" ");
+}
+
+const HEM_RIBS = ribLines([95, 368], [305, 368], [95, 398], [305, 398], 27);
+const CUFF_L_RIBS = ribLines([20.6, 310], [64, 320], [20, 330], [62, 338], 6);
+const CUFF_R_RIBS = ribLines([379.4, 310], [336, 320], [380, 330], [338, 338], 6);
+
+// Everything that makes the hoodie read as a real garment: cylindrical sleeve shading, the
+// underarm shadow, a ribbed neckline, hood folds, a pocket with depth, ribbed cuffs and hem.
+function HoodieDetail({
+  uid,
+  back,
+  clip,
+  hl,
+  soft,
+}: {
+  uid: string;
+  back: boolean;
+  clip: string;
+  hl: string;
+  soft: string;
+}) {
+  const sleeveL = `${uid}-sl-l`;
+  const sleeveR = `${uid}-sl-r`;
+  const body = `${uid}-body`;
+  const pocket = `${uid}-pocket`;
+  const hood = `${uid}-hood`;
+  return (
+    <>
+      <defs>
+        <linearGradient id={sleeveL} gradientUnits="userSpaceOnUse" x1="20" x2="96" y1="0" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity="0.2" />
+          <stop offset="0.3" stopColor="#000" stopOpacity="0.02" />
+          <stop offset="0.45" stopColor="#fff" stopOpacity="0.12" />
+          <stop offset="0.75" stopColor="#000" stopOpacity="0.06" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.26" />
+        </linearGradient>
+        <linearGradient id={sleeveR} gradientUnits="userSpaceOnUse" x1="380" x2="304" y1="0" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity="0.2" />
+          <stop offset="0.3" stopColor="#000" stopOpacity="0.02" />
+          <stop offset="0.45" stopColor="#fff" stopOpacity="0.12" />
+          <stop offset="0.75" stopColor="#000" stopOpacity="0.06" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.26" />
+        </linearGradient>
+        <linearGradient id={body} gradientUnits="userSpaceOnUse" x1="95" x2="305" y1="0" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity="0.16" />
+          <stop offset="0.14" stopColor="#000" stopOpacity="0.04" />
+          <stop offset="0.38" stopColor="#fff" stopOpacity="0.1" />
+          <stop offset="0.7" stopColor="#000" stopOpacity="0.02" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.18" />
+        </linearGradient>
+        <linearGradient id={pocket} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="#000" stopOpacity="0.16" />
+          <stop offset="0.25" stopColor="#000" stopOpacity="0.04" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.08" />
+        </linearGradient>
+        <radialGradient id={hood} cx="0.5" cy="0.35" r="0.65">
+          <stop offset="0" stopColor="#000" stopOpacity="0.05" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.24" />
+        </radialGradient>
+      </defs>
+
+      <g clipPath={`url(#${clip})`}>
+        <rect x="90" y="0" width="220" height="420" fill={`url(#${hl})`} />
+        <rect x="95" y="0" width="210" height="420" fill={`url(#${body})`} />
+        <path d="M56 80 Q22 205 20 330 L62 338 Q70 252 95 192 L95 60 Z" fill={`url(#${sleeveL})`} />
+        <path d="M344 80 Q378 205 380 330 L338 338 Q330 252 305 192 L305 60 Z" fill={`url(#${sleeveR})`} />
+        <path d={back ? HOOD_BACK : HOOD_FRONT} fill={`url(#${hood})`} />
+        {/* underarm shadow where the sleeve folds against the body */}
+        <g filter={`url(#${soft})`} fill="none" stroke="#000" strokeLinecap="round" opacity="0.16">
+          <path d="M100 150 Q108 230 98 330" strokeWidth="9" />
+          <path d="M300 150 Q292 230 302 330" strokeWidth="9" />
+        </g>
+        {/* soft shoulder light and sleeve creases */}
+        <g filter={`url(#${soft})`} fill="none" stroke="#fff" strokeLinecap="round" opacity="0.3">
+          <path d="M118 72 Q150 92 168 100" strokeWidth="7" />
+          <path d="M282 72 Q250 92 232 100" strokeWidth="7" />
+        </g>
+        <g filter={`url(#${soft})`} fill="none" stroke="#000" strokeLinecap="round" opacity="0.1">
+          <path d="M30 220 Q58 236 86 214" strokeWidth="6" />
+          <path d="M28 262 Q52 272 78 256" strokeWidth="5" />
+          <path d="M370 220 Q342 236 314 214" strokeWidth="6" />
+          <path d="M372 262 Q348 272 322 256" strokeWidth="5" />
+          <path d="M24 296 Q44 292 62 302" strokeWidth="5" />
+          <path d="M376 296 Q356 292 338 302" strokeWidth="5" />
+        </g>
+      </g>
+
+      {/* hood */}
+      {back ? (
+        <>
+          <path d="M140 52 Q150 70 200 70 Q250 70 260 52" fill="none" stroke={DARK} strokeWidth="2.4" />
+          <path d="M200 8 V70" fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth="1.4" />
+          <path d="M201.5 8 V70" fill="none" stroke="rgba(255,255,255,0.28)" strokeWidth="1" />
+          <g filter={`url(#${soft})`} fill="none" stroke="#000" strokeLinecap="round" opacity="0.12">
+            <path d="M172 14 Q164 42 156 62" strokeWidth="5" />
+            <path d="M228 14 Q236 42 244 62" strokeWidth="5" />
+          </g>
+        </>
+      ) : (
+        <>
+          <path d="M150 50 Q160 80 200 80 Q240 80 250 50 Q238 68 200 70 Q162 68 150 50 Z" fill="rgba(0,0,0,0.26)" />
+          <path d="M145 48 Q160 80 200 80 Q240 80 255 48" fill="none" stroke={DARK} strokeWidth="2.2" />
+          <path d="M139 44 Q154 84 200 84 Q246 84 261 44" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="6" strokeLinecap="round" />
+          <path d="M141 42 Q156 80 200 80 Q244 80 259 42" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.2" />
+          <path d="M200 8 V44" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1.3" />
+          <g filter={`url(#${soft})`} fill="none" stroke="#000" strokeLinecap="round" opacity="0.12">
+            <path d="M174 16 Q166 36 160 54" strokeWidth="5" />
+            <path d="M226 16 Q234 36 240 54" strokeWidth="5" />
+          </g>
+          {/* drawstrings, eyelets and aglets */}
+          <circle cx="186" cy="84" r="2.8" fill="rgba(0,0,0,0.3)" />
+          <circle cx="214" cy="84" r="2.8" fill="rgba(0,0,0,0.3)" />
+          <path d="M186 85 Q181 116 187 150" fill="none" stroke="rgba(0,0,0,0.24)" strokeWidth="5" strokeLinecap="round" />
+          <path d="M214 85 Q219 116 213 150" fill="none" stroke="rgba(0,0,0,0.24)" strokeWidth="5" strokeLinecap="round" />
+          <path d="M186 85 Q181 116 187 150" fill="none" stroke="#f4f1ea" strokeWidth="3" strokeLinecap="round" />
+          <path d="M214 85 Q219 116 213 150" fill="none" stroke="#f4f1ea" strokeWidth="3" strokeLinecap="round" />
+          <path d="M185.2 90 Q181.6 118 186.6 146" fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="0.8" strokeDasharray="1.5 1.5" />
+          <rect x="184.8" y="148" width="4.4" height="11" rx="2.2" fill="#d6d0c2" stroke={EDGE} />
+          <rect x="210.8" y="148" width="4.4" height="11" rx="2.2" fill="#d6d0c2" stroke={EDGE} />
+        </>
+      )}
+
+      {/* kangaroo pocket (front only) */}
+      {!back && (
+        <>
+          <path d="M140 314 L260 314 L274 364 L126 364 Z" fill={`url(#${pocket})`} stroke={EDGE} strokeWidth="1.3" />
+          <path d="M141 317 L259 317" {...stitch} />
+          <path d="M127.5 361 L272.5 361" {...stitch} />
+          <g filter={`url(#${soft})`} fill="none" stroke="#000" strokeLinecap="round" opacity="0.14">
+            <path d="M138 319 L262 319" strokeWidth="5" />
+          </g>
+          <path d="M126 364 L274 364" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.2" />
+          <path d="M142 314 L128 363" fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth="1.6" />
+          <path d="M258 314 L272 363" fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth="1.6" />
+        </>
+      )}
+
+      {/* shoulder and armhole seams */}
+      <path d="M97 58 Q101 125 96 190" fill="none" stroke="rgba(0,0,0,0.15)" strokeWidth="1.3" />
+      <path d="M303 58 Q299 125 304 190" fill="none" stroke="rgba(0,0,0,0.15)" strokeWidth="1.3" />
+      <path d="M99 60 Q103 125 98 188" {...stitch} />
+      <path d="M301 60 Q297 125 302 188" {...stitch} />
+
+      {/* ribbed cuffs */}
+      <path d="M20.6 310 L64 320 L62 338 L20 330 Z" fill="rgba(0,0,0,0.12)" />
+      <path d="M379.4 310 L336 320 L338 338 L380 330 Z" fill="rgba(0,0,0,0.12)" />
+      <path d={CUFF_L_RIBS} fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth="1" />
+      <path d={CUFF_R_RIBS} fill="none" stroke="rgba(0,0,0,0.14)" strokeWidth="1" />
+      <path d="M22 311 L64 321" {...stitch} />
+      <path d="M378 311 L336 321" {...stitch} />
+
+      {/* ribbed hem band */}
+      <path d="M95 368 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.11)" />
+      <path d={HEM_RIBS} fill="none" stroke="rgba(0,0,0,0.12)" strokeWidth="1" />
+      <path d="M97 368 H303" {...stitch} />
+      <path d="M97 366 H303" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
+    </>
+  );
+}
+
 export default function ProductSilhouette({ shape, fill, view }: Props & { fill: string }) {
   const uid = useUid();
   const back = view === "back";
@@ -128,6 +296,23 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
           <path d="M0 0H4M0 0V4" stroke="rgba(0,0,0,0.05)" strokeWidth="0.7" fill="none" />
         </pattern>
         <Clip id={clip} d={outline} />
+        <linearGradient id={`${uid}-tbody`} gradientUnits="userSpaceOnUse" x1="95" x2="305" y1="0" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity="0.15" />
+          <stop offset="0.14" stopColor="#000" stopOpacity="0.04" />
+          <stop offset="0.38" stopColor="#fff" stopOpacity="0.1" />
+          <stop offset="0.7" stopColor="#000" stopOpacity="0.02" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.17" />
+        </linearGradient>
+        <linearGradient id={`${uid}-tsl-l`} gradientUnits="userSpaceOnUse" x1="20" x2="96" y1="0" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity="0.16" />
+          <stop offset="0.5" stopColor="#fff" stopOpacity="0.1" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.24" />
+        </linearGradient>
+        <linearGradient id={`${uid}-tsl-r`} gradientUnits="userSpaceOnUse" x1="380" x2="304" y1="0" y2="0">
+          <stop offset="0" stopColor="#000" stopOpacity="0.16" />
+          <stop offset="0.5" stopColor="#fff" stopOpacity="0.1" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.24" />
+        </linearGradient>
       </defs>
       <g transform={mirrorOf(view)}>
 
@@ -139,6 +324,17 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
           </g>
           <g clipPath={`url(#${clip})`}>
             <rect x="90" y="0" width="220" height="420" fill={`url(#${hl})`} />
+            <rect x="95" y="0" width="210" height="420" fill={`url(#${uid}-tbody)`} />
+            <path d="M52 70 L20 95 L55 150 L95 125 L95 50 Z" fill={`url(#${uid}-tsl-l)`} />
+            <path d="M348 70 L380 95 L345 150 L305 125 L305 50 Z" fill={`url(#${uid}-tsl-r)`} />
+            <g filter={`url(#${soft})`} fill="none" stroke="#000" strokeLinecap="round" opacity="0.15">
+              <path d="M99 130 Q106 230 99 380" strokeWidth="8" />
+              <path d="M301 130 Q294 230 301 380" strokeWidth="8" />
+            </g>
+            <g filter={`url(#${soft})`} fill="none" stroke="#fff" strokeLinecap="round" opacity="0.28">
+              <path d="M120 66 Q150 86 168 92" strokeWidth="7" />
+              <path d="M280 66 Q250 86 232 92" strokeWidth="7" />
+            </g>
           </g>
           {/* ribbed collar */}
           <path
@@ -168,68 +364,13 @@ export default function ProductSilhouette({ shape, fill, view }: Props & { fill:
       )}
 
       {/* ---------------- Hoodie ---------------- */}
-      {shape === "hoodie" && !side && !back && (
+      {shape === "hoodie" && !side && (
         <>
           <g filter={`url(#${ds})`}>
-            <path d={HOOD_FRONT} fill={fill} stroke={EDGE} strokeWidth="1.5" />
-            <path d={hoodiePath(75)} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+            <path d={back ? HOOD_BACK : HOOD_FRONT} fill={fill} stroke={EDGE} strokeWidth="1.5" />
+            <path d={hoodiePath(back ? 60 : 75)} fill={fill} stroke={EDGE} strokeWidth="1.5" />
           </g>
-          <g clipPath={`url(#${clip})`}>
-            <rect x="90" y="0" width="220" height="420" fill={`url(#${hl})`} />
-          </g>
-          {/* hood opening, drawstrings */}
-          <path
-            d="M150 50 Q160 80 200 80 Q240 80 250 50 Q238 68 200 70 Q162 68 150 50 Z"
-            fill="rgba(0,0,0,0.2)"
-          />
-          <path d="M145 48 Q160 80 200 80 Q240 80 255 48" fill="none" stroke={DARK} strokeWidth="2" />
-          <path d="M187 82 Q184 112 189 142" fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="4.5" strokeLinecap="round" />
-          <path d="M213 82 Q216 112 211 142" fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="4.5" strokeLinecap="round" />
-          <path d="M187 82 Q184 112 189 142" fill="none" stroke="#f4f1ea" strokeWidth="2.8" strokeLinecap="round" />
-          <path d="M213 82 Q216 112 211 142" fill="none" stroke="#f4f1ea" strokeWidth="2.8" strokeLinecap="round" />
-          <circle cx="189" cy="144" r="3" fill="#cfc9bb" stroke={EDGE} />
-          <circle cx="211" cy="144" r="3" fill="#cfc9bb" stroke={EDGE} />
-          {/* kangaroo pocket */}
-          <path
-            d="M140 314 L260 314 L274 364 L126 364 Z"
-            fill="rgba(0,0,0,0.05)"
-            stroke={EDGE}
-            strokeWidth="1.3"
-          />
-          <path d="M143 319 L257 319" {...stitch} />
-          {/* seams, cuffs, hem rib */}
-          <path d="M97 58 Q101 125 96 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M303 58 Q299 125 304 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M20.6 310 L64 320 L62 338 L20 330 Z" fill="rgba(0,0,0,0.1)" />
-          <path d="M379.4 310 L336 320 L338 338 L380 330 Z" fill="rgba(0,0,0,0.1)" />
-          <path d="M22 311 L64 321" {...stitch} />
-          <path d="M378 311 L336 321" {...stitch} />
-          <path d="M95 368 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.09)" />
-          <path d="M105 370 V398 M115 370 V398 M125 370 V398 M135 370 V398 M145 370 V398 M155 370 V398 M165 370 V398 M175 370 V398 M185 370 V398 M195 370 V398 M205 370 V398 M215 370 V398 M225 370 V398 M235 370 V398 M245 370 V398 M255 370 V398 M265 370 V398 M275 370 V398 M285 370 V398 M295 370 V398" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="1" />
-          <path d="M97 368 H303" {...stitch} />
-        </>
-      )}
-
-      {shape === "hoodie" && !side && back && (
-        <>
-          <g filter={`url(#${ds})`}>
-            <path d={hoodiePath(60)} fill={fill} stroke={EDGE} strokeWidth="1.5" />
-            <path d={HOOD_BACK} fill={fill} stroke={EDGE} strokeWidth="1.5" />
-          </g>
-          <g clipPath={`url(#${clip})`}>
-            <rect x="90" y="0" width="220" height="420" fill={`url(#${hl})`} />
-          </g>
-          <path d="M140 52 Q150 70 200 70 Q250 70 260 52" fill="none" stroke={DARK} strokeWidth="2" />
-          <path d="M200 8 V70" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="1.2" />
-          <path d="M97 58 Q101 125 96 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M303 58 Q299 125 304 190" fill="none" stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
-          <path d="M20.6 310 L64 320 L62 338 L20 330 Z" fill="rgba(0,0,0,0.1)" />
-          <path d="M379.4 310 L336 320 L338 338 L380 330 Z" fill="rgba(0,0,0,0.1)" />
-          <path d="M22 311 L64 321" {...stitch} />
-          <path d="M378 311 L336 321" {...stitch} />
-          <path d="M95 368 H305 V390 Q305 400 295 400 H105 Q95 400 95 390 Z" fill="rgba(0,0,0,0.09)" />
-          <path d="M105 370 V398 M115 370 V398 M125 370 V398 M135 370 V398 M145 370 V398 M155 370 V398 M165 370 V398 M175 370 V398 M185 370 V398 M195 370 V398 M205 370 V398 M215 370 V398 M225 370 V398 M235 370 V398 M245 370 V398 M255 370 V398 M265 370 V398 M275 370 V398 M285 370 V398 M295 370 V398" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="1" />
-          <path d="M97 368 H303" {...stitch} />
+          <HoodieDetail uid={uid} back={back} clip={clip} hl={hl} soft={soft} />
         </>
       )}
 

@@ -18,6 +18,36 @@ const STEPS = [
   },
 ];
 
+const FAQ = [
+  {
+    q: "How long until my order ships?",
+    a: "Every item is printed to order. Production usually takes 2 to 5 business days, then it ships and you get a tracking number by email.",
+  },
+  {
+    q: "What kind of image can I upload?",
+    a: "PNG, JPG or WebP up to 10 MB. Bigger images print sharper, and the editor warns you if one is too small for the size you chose.",
+  },
+  {
+    q: "What gets printed?",
+    a: "Only what sits inside the dashed print area. Anything outside it is shown faded in the editor and is cut off.",
+  },
+  {
+    q: "Can I cancel or change an order?",
+    a: "You can cancel from your order page any time before production starts, and you are refunded in full.",
+  },
+  {
+    q: "What if something arrives wrong?",
+    a: "Read our returns policy for what we cover, then contact us and we will make it right.",
+  },
+];
+
+const TRUST = [
+  "Printed on demand",
+  "Preview on a model before you buy",
+  "Secure checkout",
+  "Cancel until production",
+];
+
 export default async function HomePage() {
   const products = await prisma.product.findMany({
     where: { active: true },
@@ -65,6 +95,12 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <ul className="trust-strip" aria-label="Why shop here">
+        {TRUST.map((t) => (
+          <li key={t}>{t}</li>
+        ))}
+      </ul>
+
       <section id="products" className="section">
         <div className="container">
           <div className="section-head reveal">
@@ -110,6 +146,31 @@ export default async function HomePage() {
               </li>
             ))}
           </ol>
+        </div>
+      </section>
+
+      <section id="faq" className="section">
+        <div className="container faq">
+          <div className="section-head reveal">
+            <span className="kicker">Questions</span>
+            <h2>Good to know.</h2>
+          </div>
+          <div className="faq-list reveal">
+            {FAQ.map((f) => (
+              <details key={f.q}>
+                <summary>{f.q}</summary>
+                <p>
+                  {f.a}
+                  {f.q.startsWith("What if") && (
+                    <>
+                      {" "}
+                      <Link href="/returns">Returns policy</Link>
+                    </>
+                  )}
+                </p>
+              </details>
+            ))}
+          </div>
         </div>
       </section>
     </>
