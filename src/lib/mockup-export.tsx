@@ -177,63 +177,59 @@ export async function downloadMockups(opts: {
 
 // ---- Photo mockups -------------------------------------------------------------------------
 
-const smooth = (a: number, b: number, v: number) => {
-  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
-
 function hexToRgb(hex: string) {
   const n = parseInt(hex.replace("#", ""), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255] as const;
 }
 
-/** Recolours the white garment in a photo. Skin, hair, jeans and the background are left alone. */
-function tintGarment(ctx: CanvasRenderingContext2D, size: number, t: PhotoTemplate, hex: string) {
+/**
+ * Recolours the white garment in a photo, using its cut-out mask (see scripts/build-mockup-masks.ts)
+ * so the background, skin and jeans are untouched. The photo's own folds and light are kept and
+ * made stronger for darker colours, otherwise a dark garment turns into a flat shape.
+ */
+async function tintGarment(ctx: CanvasRenderingContext2D, size: number, t: PhotoTemplate, hex: string) {
   const [tr, tg, tb] = hexToRgb(hex);
+  const target = 0.299 * tr + 0.587 * tg + 0.114 * tb;
   // Already (almost) white: keep the photo as it is.
-  if (0.299 * tr + 0.587 * tg + 0.114 * tb > 238) return;
+  if (target > 238) return;
 
-  // Soft mask of the garment's inside, from its hand-traced outline.
-  const maskCanvas = document.createElement("canvas");
-  maskCanvas.width = maskCanvas.height = size;
-  const mctx = maskCanvas.getContext("2d");
+  const maskImg = await loadImage(t.src.replace(/\.webp$/, "-mask.png?v=4"));
+  const mc = document.createElement("canvas");
+  mc.width = mc.height = size;
+  const mctx = mc.getContext("2d", { willReadFrequently: true });
   if (!mctx) return;
-  mctx.filter = "blur(2px)";
-  mctx.fillStyle = "#000";
-  mctx.beginPath();
-  t.outline.forEach(([x, y], i) => (i === 0 ? mctx.moveTo(x, y) : mctx.lineTo(x, y)));
-  mctx.closePath();
-  mctx.fill();
-  // grow the outline a few pixels toward the real edge
-  mctx.strokeStyle = "#000";
-  mctx.lineJoin = "round";
-  mctx.lineWidth = 14;
-  mctx.stroke();
-  const inside = mctx.getImageData(0, 0, size, size).data;
+  mctx.drawImage(maskImg, 0, 0, size, size);
+  const mask = mctx.getImageData(0, 0, size, size).data;
 
   const img = ctx.getImageData(0, 0, size, size);
   const d = img.data;
-  for (const b of t.hull) {
-    const x0 = Math.max(0, Math.floor(b.x));
-    const y0 = Math.max(0, Math.floor(b.y));
-    const x1 = Math.min(size, Math.ceil(b.x + b.w));
-    const y1 = Math.min(size, Math.ceil(b.y + b.h));
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        const i = (y * size + x) * 4;
-        const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const sat = Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]);
-        // Fabric is nearly colourless and not dark. Inside the outline that is enough (creases
-        // included); near the edge only clearly bright pixels count, so the background stays.
-        const plain = (1 - smooth(22, 40, sat)) * smooth(120, 150, lum);
-        const m = Math.max((inside[i + 3] / 255) * plain, smooth(214, 221, lum) * (1 - smooth(22, 40, sat)));
-        if (m <= 0) continue;
-        const k = lum / 244; // keeps the folds and shading of the photo
-        d[i] = d[i] + (Math.min(255, tr * k) - d[i]) * m;
-        d[i + 1] = d[i + 1] + (Math.min(255, tg * k) - d[i + 1]) * m;
-        d[i + 2] = d[i + 2] + (Math.min(255, tb * k) - d[i + 2]) * m;
-      }
+
+  // Typical brightness of the garment, so folds are measured against it.
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (mask[i + 3] > 240) {
+      sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      n++;
     }
+  }
+  if (n === 0) return;
+  const ref = sum / n;
+
+  const dark = 1 - target / 255;
+  const gain = 1.3 + dark * 1.5;
+  const sheen = dark * 70;
+
+  for (let i = 0; i < d.length; i += 4) {
+    const m = mask[i + 3] / 255;
+    if (m <= 0) continue;
+    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const k = lum / ref;
+    const kk = Math.min(1.7, Math.max(0.12, 1 + (k - 1) * gain));
+    const lift = Math.max(0, k - 1) * sheen;
+    d[i] += (Math.min(255, tr * kk + lift) - d[i]) * m;
+    d[i + 1] += (Math.min(255, tg * kk + lift) - d[i + 1]) * m;
+    d[i + 2] += (Math.min(255, tb * kk + lift) - d[i + 2]) * m;
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -276,7 +272,7 @@ export async function renderPhotoMockup(opts: {
   pctx.globalCompositeOperation = "multiply";
   pctx.drawImage(shade, 0, 0);
 
-  tintGarment(ctx, t.size, t, opts.fill);
+  await tintGarment(ctx, t.size, t, opts.fill);
   ctx.globalAlpha = 0.97;
   ctx.drawImage(prints, 0, 0);
 
