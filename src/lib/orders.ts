@@ -14,10 +14,6 @@ export const cartInclude = {
 export type CartWithItems = Prisma.CartGetPayload<{ include: typeof cartInclude }>;
 export type CartLine = CartWithItems["items"][number];
 
-// Payment isn't built yet. While this is on, checkout simulates a successful payment and saves
-// the order as PAID. Set PAYMENT_MODE=live once a real payment provider is connected.
-export const TEST_PAYMENTS = process.env.PAYMENT_MODE !== "live";
-
 export const toCents = (value: unknown) => Math.round(Number(value) * 100);
 export const toMoney = (cents: number) => cents / 100;
 

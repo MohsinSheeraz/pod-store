@@ -7,7 +7,7 @@ export default function EditorLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <Header />
-      <main className="editor-main">{children}</main>
+      <main id="main" className="editor-main">{children}</main>
     </>
   );
 }

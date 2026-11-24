@@ -4,32 +4,33 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { formatMoney } from "@/lib/format";
-import { TEST_PAYMENTS } from "@/lib/orders";
-import { asFont, asPlacement, asTextStyle } from "@/lib/cart";
-import PrintPreview from "@/components/product/PrintPreview";
-import MockupDownload from "@/components/product/MockupDownload";
-import type { Shape } from "@/components/product/ProductSilhouette";
-import type { ViewKey } from "@/components/product/types";
-import type { ExportView } from "@/lib/mockup-export";
+import { canCancel, orderRef } from "@/lib/order-views";
+import { paymentMode } from "@/lib/env";
+import { syncStripePayment } from "@/lib/payments";
+import OrderItems from "@/components/orders/OrderItems";
+import OrderTimeline from "@/components/orders/OrderTimeline";
+import StatusBadge from "@/components/orders/StatusBadge";
+import CancelOrderButton from "@/components/orders/CancelOrderButton";
+import PayNowButton from "@/components/orders/PayNowButton";
 
-export const metadata: Metadata = { title: "Order confirmed" };
+export const metadata: Metadata = { title: "Your order" };
 
-const VIEWS: ViewKey[] = ["front", "back", "left", "right"];
-
-const STATUS: Record<string, string> = {
-  PENDING: "Awaiting payment",
-  PAID: "Paid",
-  IN_PRODUCTION: "In production",
-  SHIPPED: "Shipped",
-  DELIVERED: "Delivered",
-  CANCELLED: "Cancelled",
-};
-
-export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function OrderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ placed?: string; canceled?: string }>;
+}) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
   const { id } = await params;
+  const { placed, canceled } = await searchParams;
+
+  // Back from the payment page: ask Stripe straight away in case the webhook is a moment late.
+  if (placed !== undefined) await syncStripePayment(id);
+
   const order = await prisma.order.findFirst({
     where: { id, userId: session.user.id },
     include: { items: { include: { prints: true } } },
@@ -37,101 +38,60 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   if (!order) notFound();
 
   const ship = order.shippingAddress as Record<string, string>;
+  const pending = order.status === "PENDING";
+  const justPlaced = placed !== undefined && !pending && order.status !== "CANCELLED";
+  const simulated = paymentMode() === "simulated" && order.paymentRef === "simulated";
 
   return (
     <div className="container cart-page">
       <div className="order-done">
-        <span className="order-tick" aria-hidden="true">
-          ✓
-        </span>
-        <h1>Order placed. Thank you!</h1>
+        {justPlaced ? (
+          <>
+            <span className="order-tick" aria-hidden="true">
+              ✓
+            </span>
+            <h1>Order placed. Thank you!</h1>
+          </>
+        ) : (
+          <h1>Order {orderRef(order.id)}</h1>
+        )}
         <p className="hint">
-          Order <strong>#{order.id.slice(-8).toUpperCase()}</strong> · {STATUS[order.status] ?? order.status}
-          {TEST_PAYMENTS && " · test payment, no card was charged"}
+          {justPlaced && <>Order {orderRef(order.id)} · </>}
+          Placed {order.createdAt.toLocaleDateString("en-US", { dateStyle: "medium" })}
+          {simulated && " · test payment, no card was charged"}
         </p>
+        <StatusBadge status={order.status} />
+        {pending && (
+          <p className="warn">
+            {canceled !== undefined
+              ? "Payment was cancelled. Your order is saved; complete the payment whenever you're ready."
+              : placed !== undefined
+                ? "We haven't received your payment yet. This page updates once it arrives."
+                : "This order is waiting for payment."}
+          </p>
+        )}
       </div>
+
+      <OrderTimeline status={order.status} />
 
       <div className="cart-layout">
         <section className="cart-summary">
           <h2>Items</h2>
-          <ul className="order-items">
-            {order.items.map((item) => {
-              const views: ExportView[] = VIEWS.map((view) => ({
-                view,
-                zones: item.prints
-                  .filter((p) => p.view === view && (p.text || p.designImageUrl))
-                  .map((p) => ({
-                    x: p.zoneX,
-                    y: p.zoneY,
-                    w: p.zoneW,
-                    h: p.zoneH,
-                    layer: p.text
-                      ? {
-                          kind: "text" as const,
-                          text: p.text,
-                          font: asFont(p.font),
-                          color: p.color ?? "#14161B",
-                          style: asTextStyle(p.placement),
-                          placement: asPlacement(p.placement),
-                        }
-                      : {
-                          kind: "image" as const,
-                          imageUrl: p.designImageUrl as string,
-                          placement: asPlacement(p.placement),
-                        },
-                  })),
-              })).filter((v) => v.zones.length > 0);
-              const files = item.prints.filter((p) => p.designImageUrl);
-
-              return (
-                <li key={item.id} className="order-item">
-                  <div className="cart-previews">
-                    {views.map((v) => (
-                      <PrintPreview
-                        key={v.view}
-                        shape={item.shape as Shape}
-                        view={v.view}
-                        fill={item.colorHex}
-                        zones={v.zones.map((z, i) => ({ id: `${v.view}-${i}`, ...z }))}
-                      />
-                    ))}
-                  </div>
-                  <div className="order-item-info">
-                    <p>
-                      <strong>
-                        {item.productName} × {item.quantity}
-                      </strong>
-                      <small>
-                        {item.variantLabel}
-                        {item.prints.length > 0 && ` · ${item.prints.map((p) => p.zoneLabel).join(", ")}`}
-                      </small>
-                    </p>
-                    <p className="order-item-price">{formatMoney(Number(item.unitPrice) * item.quantity)}</p>
-                    <div className="order-downloads">
-                      {views.length > 0 && (
-                        <MockupDownload
-                          shape={item.shape as Shape}
-                          fill={item.colorHex}
-                          baseName={`${item.productName} ${item.variantLabel}`}
-                          views={views}
-                        />
-                      )}
-                      {files.map((p, i) => (
-                        <a
-                          key={i}
-                          className="btn btn-ghost btn-sm"
-                          href={p.designImageUrl as string}
-                          download
-                        >
-                          Artwork · {p.zoneLabel}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          <OrderItems items={order.items} />
+          <div className="summary-line">
+            <span>Subtotal</span>
+            <span>{formatMoney(Number(order.subtotal))}</span>
+          </div>
+          <div className="summary-line">
+            <span>Shipping</span>
+            <span>{Number(order.shipping) === 0 ? "Free" : formatMoney(Number(order.shipping))}</span>
+          </div>
+          {Number(order.tax) > 0 && (
+            <div className="summary-line">
+              <span>Tax</span>
+              <span>{formatMoney(Number(order.tax))}</span>
+            </div>
+          )}
           <div className="summary-row">
             <span>Total</span>
             <strong>{formatMoney(Number(order.total))}</strong>
@@ -149,6 +109,17 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
             <br />
             {ship.country}
           </p>
+          {order.trackingNumber && (
+            <p className="tracking">
+              <small>Tracking number</small>
+              <strong>{order.trackingNumber}</strong>
+            </p>
+          )}
+          {pending && <PayNowButton orderId={order.id} />}
+          <Link href="/orders" className="btn btn-ghost btn-block">
+            All my orders
+          </Link>
+          {canCancel(order.status) && <CancelOrderButton orderId={order.id} />}
           <Link href="/#products" className="btn btn-primary btn-block">
             Keep shopping
           </Link>

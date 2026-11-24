@@ -31,7 +31,7 @@ export const PHOTO_MOCKUPS: Partial<Record<Shape, PhotoTemplate[]>> = {
     {
       id: "model-front",
       label: "On model · front",
-      src: "/mockups/tee-model-front.png",
+      src: "/mockups/tee-model-front.webp",
       size: S,
       areas: {
         front: { x: 390, y: 345, w: 230, h: 268 },
@@ -47,7 +47,7 @@ export const PHOTO_MOCKUPS: Partial<Record<Shape, PhotoTemplate[]>> = {
     {
       id: "model-back",
       label: "On model · back",
-      src: "/mockups/tee-model-back.png",
+      src: "/mockups/tee-model-back.webp",
       size: S,
       areas: { back: { x: 395, y: 315, w: 230, h: 268 } },
       hull: [
@@ -60,7 +60,7 @@ export const PHOTO_MOCKUPS: Partial<Record<Shape, PhotoTemplate[]>> = {
     {
       id: "flat",
       label: "Flat",
-      src: "/mockups/tee-flat.png",
+      src: "/mockups/tee-flat.webp",
       size: S,
       areas: {
         front: { x: 335, y: 255, w: 354, h: 413 },
@@ -74,7 +74,7 @@ export const PHOTO_MOCKUPS: Partial<Record<Shape, PhotoTemplate[]>> = {
     {
       id: "model-front",
       label: "On model · front",
-      src: "/mockups/hoodie-model-front.png",
+      src: "/mockups/hoodie-model-front.webp",
       size: S,
       areas: {
         front: { x: 385, y: 343, w: 240, h: 262 },
@@ -86,7 +86,7 @@ export const PHOTO_MOCKUPS: Partial<Record<Shape, PhotoTemplate[]>> = {
     {
       id: "model-back",
       label: "On model · back",
-      src: "/mockups/hoodie-model-back.png",
+      src: "/mockups/hoodie-model-back.webp",
       size: S,
       areas: { back: { x: 395, y: 395, w: 235, h: 274 } },
       hull: [{ x: 270, y: 215, w: 490, h: 660 }],
@@ -95,7 +95,7 @@ export const PHOTO_MOCKUPS: Partial<Record<Shape, PhotoTemplate[]>> = {
     {
       id: "flat",
       label: "Flat",
-      src: "/mockups/hoodie-flat.png",
+      src: "/mockups/hoodie-flat.webp",
       size: S,
       areas: {
         front: { x: 385, y: 322, w: 255, h: 278 },

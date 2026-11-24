@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { randomUUID } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { rateLimit, tooManyRequests } from "@/lib/rate-limit";
+import { saveUpload, storageMode } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -22,14 +21,29 @@ function sniffImageType(buf: Buffer): "png" | "jpg" | "webp" | null {
   return null;
 }
 
+const MIME = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" } as const;
+
 export async function POST(req: Request) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Log in to upload artwork." }, { status: 401 });
   }
 
-  const formData = await req.formData();
-  const file = formData.get("file");
+  if (storageMode() === "disabled") {
+    return NextResponse.json({ error: "Uploads aren't available right now." }, { status: 503 });
+  }
+
+  const limit = await rateLimit(`upload:${session.user.id}`, { limit: 40, windowSec: 3600 });
+  if (!limit.ok) return tooManyRequests(limit.retryAfter, "You've uploaded a lot of files. Try again later.");
+
+  // Refuse oversized requests before reading them into memory.
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > MAX_BYTES + 64 * 1024) {
+    return NextResponse.json({ error: "Image must be under 10 MB." }, { status: 413 });
+  }
+
+  const formData = await req.formData().catch(() => null);
+  const file = formData?.get("file");
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file provided." }, { status: 400 });
@@ -43,22 +57,21 @@ export async function POST(req: Request) {
   const ext = sniffImageType(buffer);
 
   if (!ext) {
-    return NextResponse.json(
-      { error: "Upload a PNG, JPG, or WebP image." },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Upload a PNG, JPG, or WebP image." }, { status: 400 });
   }
 
-  const uploadsDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadsDir, { recursive: true });
-
-  const filename = `${randomUUID()}.${ext}`;
-  await writeFile(path.join(uploadsDir, filename), buffer);
+  let stored;
+  try {
+    stored = await saveUpload(buffer, ext, MIME[ext]);
+  } catch (error) {
+    console.error("Upload storage error:", error);
+    return NextResponse.json({ error: "Could not save the file. Try again." }, { status: 502 });
+  }
 
   const design = await prisma.design.create({
     data: {
       name: file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Untitled design",
-      imageUrl: `/uploads/${filename}`,
+      imageUrl: stored.url,
       ownerId: session.user.id,
     },
   });

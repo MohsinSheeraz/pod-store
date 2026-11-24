@@ -10,6 +10,7 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -21,7 +22,7 @@ export default function SignupPage() {
     const res = await fetch("/api/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, accepted }),
     });
     const data = await res.json();
     setLoading(false);
@@ -31,7 +32,9 @@ export default function SignupPage() {
       return;
     }
 
-    toast.success("Account created. Log in to continue.");
+    toast.success(
+      data.verifyEmail ? "Account created. Check your email to confirm it, then log in." : "Account created. Log in to continue."
+    );
     router.push("/login");
   }
 
@@ -74,6 +77,12 @@ export default function SignupPage() {
           />
           <span className="hint">At least 8 characters.</span>
         </div>
+        <label className="check">
+          <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} required />
+          <span>
+            I agree to the <Link href="/terms">Terms</Link> and the <Link href="/privacy">Privacy Policy</Link>.
+          </span>
+        </label>
         {error && (
           <p className="error-text" role="alert">
             {error}

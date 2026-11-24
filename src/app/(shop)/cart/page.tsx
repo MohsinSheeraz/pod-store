@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { formatMoney } from "@/lib/format";
+import { calcTotals } from "@/lib/pricing";
+import { pricingConfig } from "@/lib/env";
 import { asFont, asPlacement, asTextStyle } from "@/lib/cart";
 import { shapeFor } from "@/components/product/ProductSilhouette";
 import PrintPreview, { type PreviewZone } from "@/components/product/PrintPreview";
@@ -97,6 +99,8 @@ export default async function CartPage() {
 
   const subtotal = rows.filter((r) => r.purchasable).reduce((sum, r) => sum + r.lineTotal, 0);
   const itemCount = rows.filter((r) => r.purchasable).reduce((sum, r) => sum + r.quantity, 0);
+  const totals = calcTotals(Math.round(subtotal * 100));
+  const cfg = pricingConfig();
   const hasBlocked = rows.some((r) => !r.purchasable);
 
   return (
@@ -170,10 +174,23 @@ export default async function CartPage() {
               </span>
               <span>{formatMoney(subtotal)}</span>
             </div>
-            <div className="summary-row">
-              <span>Subtotal</span>
-              <strong>{formatMoney(subtotal)}</strong>
+            <div className="summary-line">
+              <span>Shipping</span>
+              <span>{totals.shipping === 0 ? "Free" : formatMoney(totals.shipping / 100)}</span>
             </div>
+            {totals.tax > 0 && (
+              <div className="summary-line">
+                <span>Tax</span>
+                <span>{formatMoney(totals.tax / 100)}</span>
+              </div>
+            )}
+            <div className="summary-row">
+              <span>Total</span>
+              <strong>{formatMoney(totals.total / 100)}</strong>
+            </div>
+            {totals.shipping > 0 && cfg.freeShippingOver > 0 && (
+              <p className="hint">Free shipping on orders over {formatMoney(cfg.freeShippingOver)}.</p>
+            )}
             {hasBlocked ? (
               <p className="warn">Remove the unavailable items to check out.</p>
             ) : (

@@ -24,7 +24,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const product = await getProduct(slug);
-  return { title: product?.name ?? "Product" };
+  return {
+    title: product?.name ?? "Product",
+    description: product ? `${product.description} Design it yourself and preview it on a model.` : undefined,
+    openGraph: product ? { title: product.name, description: product.description } : undefined,
+  };
 }
 
 export default async function ProductPage({

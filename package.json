@@ -7,12 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/placement-rules.test.ts src/lib/image-size.test.ts",
+    "test": "tsx --test src/lib/placement-rules.test.ts src/lib/image-size.test.ts src/lib/order-views.test.ts src/lib/pricing.test.ts src/lib/stripe.test.ts src/lib/storage.test.ts src/lib/rate-limit.test.ts src/lib/env.test.ts src/lib/email-templates.test.ts src/lib/tokens.test.ts",
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "admin:create": "tsx scripts/create-admin.ts",
+    "admin:demote": "tsx scripts/demote-admin.ts",
+    "db:deploy": "prisma migrate deploy"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

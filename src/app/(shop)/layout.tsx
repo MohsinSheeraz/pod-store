@@ -6,7 +6,7 @@ export default function ShopLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <Header />
-      <main className="site-main">{children}</main>
+      <main id="main" className="site-main">{children}</main>
       <Footer />
     </>
   );

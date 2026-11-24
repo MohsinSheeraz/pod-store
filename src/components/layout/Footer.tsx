@@ -88,6 +88,11 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/orders" className="foot-link">
+                  My orders
+                </Link>
+              </li>
+              <li>
                 <Link href="/login" className="foot-link">
                   Log in
                 </Link>
@@ -109,6 +114,12 @@ export default function Footer() {
           <p>
             © {year} {SITE.name}. Every order is printed after you place it. Nothing sits in a warehouse.
           </p>
+          <nav className="legal-links" aria-label="Policies">
+            <Link href="/terms">Terms</Link>
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/shipping">Shipping</Link>
+            <Link href="/returns">Returns</Link>
+          </nav>
           <a href="#" className="to-top">
             Back to top ↑
           </a>

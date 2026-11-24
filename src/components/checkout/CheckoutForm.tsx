@@ -39,8 +39,19 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
         return;
       }
 
+      // Stripe: continue on the hosted payment page.
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      if (data.paymentError) {
+        toast.error("Your order is saved, but the payment page didn't open. You can pay from your order.");
+        router.push(`/orders/${data.id}`);
+        return;
+      }
+
       toast.success("Order placed.");
-      router.push(`/orders/${data.id}`);
+      router.push(`/orders/${data.id}?placed=1`);
       router.refresh();
     } catch {
       setError("Could not reach the server. Try again.");

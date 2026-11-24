@@ -79,6 +79,9 @@ export default function HeaderClient({ user, cartCount }: Props) {
 
           {user ? (
             <div className="user-chip">
+              <Link href="/orders" className="nav-link">
+                Orders
+              </Link>
               {user.role === "ADMIN" && (
                 <Link href="/admin" className="nav-link">
                   Admin
@@ -125,6 +128,7 @@ export default function HeaderClient({ user, cartCount }: Props) {
           <Link href="/cart">Cart{cartCount > 0 ? ` (${cartCount})` : ""}</Link>
           {user ? (
             <>
+              <Link href="/orders">My orders</Link>
               {user.role === "ADMIN" && <Link href="/admin">Admin</Link>}
               <SignOutButton />
             </>

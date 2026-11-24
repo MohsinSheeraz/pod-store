@@ -32,10 +32,28 @@ model User {
   email     String   @unique
   password  String
   role      Role     @default(CUSTOMER)
+  // Set when the shopper confirms their email address
+  emailVerified DateTime?
+  tokens    AuthToken[]
   designs   Design[]
   orders    Order[]
   cart      Cart?
   createdAt DateTime @default(now())
+}
+
+// One-time links sent by email: confirm an address ("verify") or choose a new password ("reset").
+// Only a hash of the token is stored.
+model AuthToken {
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  type      String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, type])
 }
 
 model Category {
@@ -156,7 +174,15 @@ model Order {
   user            User        @relation(fields: [userId], references: [id])
   userId          String
   status          OrderStatus @default(PENDING)
+  // total = subtotal + shipping + tax
+  subtotal        Decimal     @default(0) @db.Decimal(10, 2)
+  shipping        Decimal     @default(0) @db.Decimal(10, 2)
+  tax             Decimal     @default(0) @db.Decimal(10, 2)
   total           Decimal     @db.Decimal(10, 2)
+  // Payment provider references, set when payment starts and when it is confirmed
+  stripeSessionId String?
+  paymentRef      String?
+  paidAt          DateTime?
   // { name, phone, line1, city, postalCode, country }
   shippingAddress Json
   trackingNumber  String?
@@ -164,6 +190,9 @@ model Order {
   deliveredAt     DateTime?
   items           OrderItem[]
   createdAt       DateTime    @default(now())
+
+  @@index([stripeSessionId])
+  @@index([userId, createdAt])
 }
 
 // Snapshot of what was ordered, so later catalog edits never change past orders

@@ -1,7 +1,9 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   session: { strategy: "jwt" },
@@ -14,10 +16,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
+        const email = (credentials.email as string).trim().toLowerCase();
 
-        const user = await prisma.user.findUnique({
-          where: { email: (credentials.email as string).trim().toLowerCase() },
-        });
+        // Slow down password guessing: per account, and per address.
+        let ip = "unknown";
+        try {
+          ip = clientIp(await headers());
+        } catch {
+          /* no request context: fall back to the account limit alone */
+        }
+        const [byEmail, byIp] = await Promise.all([
+          rateLimit(`login:${email}`, { limit: 8, windowSec: 15 * 60 }),
+          rateLimit(`login-ip:${ip}`, { limit: 40, windowSec: 15 * 60 }),
+        ]);
+        if (!byEmail.ok || !byIp.ok) return null;
+
+        const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
 
         const valid = await bcrypt.compare(

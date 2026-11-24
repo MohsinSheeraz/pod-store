@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { FONT_KEYS, SCALE_MAX, SCALE_MIN, textLimit } from "@/lib/placement";
 import { exclusiveConflict, validatePlacement, type LayerSpec } from "@/lib/placement-rules";
 import { readImageSize } from "@/lib/image-size";
+import { readFileHead } from "@/lib/storage";
 
 const FONTS: string[] = FONT_KEYS;
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -25,24 +26,32 @@ const validPlacement = (p: unknown) => {
   );
 };
 
-// Width / height of a design file, or null when it can't be read. Only files under
-// /public are read; anything else (external catalog art) skips the height check.
+// Width / height of a design file, or null when it can't be read. Files under /public are read
+// from disk; files on our storage bucket are read with a short ranged request. Anything else
+// (external catalog art) skips the height check.
 async function designAspect(imageUrl: string): Promise<number | null> {
-  if (!imageUrl.startsWith("/")) return null;
-  const file = path.join(PUBLIC_DIR, imageUrl);
-  if (!file.startsWith(PUBLIC_DIR + path.sep)) return null;
-  try {
-    const handle = await open(file, "r");
+  let head: Buffer | null = null;
+
+  if (imageUrl.startsWith("/")) {
+    const file = path.join(PUBLIC_DIR, imageUrl);
+    if (!file.startsWith(PUBLIC_DIR + path.sep)) return null;
     try {
-      const { buffer, bytesRead } = await handle.read(Buffer.alloc(256 * 1024), 0, 256 * 1024, 0);
-      const size = readImageSize(buffer.subarray(0, bytesRead));
-      return size ? size.width / size.height : null;
-    } finally {
-      await handle.close();
+      const handle = await open(file, "r");
+      try {
+        const { buffer, bytesRead } = await handle.read(Buffer.alloc(256 * 1024), 0, 256 * 1024, 0);
+        head = buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return null;
     }
-  } catch {
-    return null;
+  } else {
+    head = await readFileHead(imageUrl);
   }
+
+  const size = head ? readImageSize(head) : null;
+  return size ? size.width / size.height : null;
 }
 
 type PrintInput = {

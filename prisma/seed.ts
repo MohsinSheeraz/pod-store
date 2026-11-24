@@ -196,19 +196,29 @@ const products: SeedProduct[] = [
 ];
 
 async function main() {
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "change-me-123";
-  const hashed = await bcrypt.hash(adminPassword, 10);
+  // The first admin comes from the environment. There is no built-in password: a seed run against
+  // a real database must never create an account anyone can guess.
+  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? "").trim().toLowerCase();
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "";
 
-  await prisma.user.upsert({
-    where: { email: "admin@pressroom.test" },
-    update: {},
-    create: {
-      name: "Admin",
-      email: "admin@pressroom.test",
-      password: hashed,
-      role: "ADMIN",
-    },
-  });
+  if (adminEmail && adminPassword.length >= 12) {
+    await prisma.user.upsert({
+      where: { email: adminEmail },
+      update: {},
+      create: {
+        name: "Admin",
+        email: adminEmail,
+        password: await bcrypt.hash(adminPassword, 12),
+        role: "ADMIN",
+        emailVerified: new Date(),
+      },
+    });
+    console.log(`Admin account ready: ${adminEmail}`);
+  } else {
+    console.log(
+      "No admin created. Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD (12+ characters), or run: npm run admin:create -- <email> <password>"
+    );
+  }
 
   for (const c of categories) {
     await prisma.category.upsert({
@@ -295,7 +305,7 @@ async function main() {
     }
   }
 
-  console.log("Seeded. Admin login: admin@pressroom.test /", adminPassword);
+  console.log("Seeded the catalog.");
 }
 
 main()
