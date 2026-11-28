@@ -131,8 +131,13 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Choose artwork or text, not both." }, { status: 400 });
       }
       const design = await prisma.design.findUnique({ where: { id: raw.designId } });
-      if (!design || (!design.isCatalog && design.ownerId !== session.user.id)) {
+      // Catalog art, the shopper's own uploads, or a guest upload (no owner yet) that they now claim.
+      const usable = !!design && (design.isCatalog || design.ownerId === session.user.id || design.ownerId === null);
+      if (!design || !usable) {
         return NextResponse.json({ error: "Artwork not found." }, { status: 404 });
+      }
+      if (!design.isCatalog && design.ownerId === null) {
+        await prisma.design.updateMany({ where: { id: design.id, ownerId: null }, data: { ownerId: session.user.id } });
       }
 
       const spec: LayerSpec = { kind: "image", aspect: await designAspect(design.imageUrl) };

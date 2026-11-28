@@ -361,10 +361,6 @@ function Customizer({ product, loggedIn, catalog, mine, shippingNote, initialCol
   async function uploadFile(file: File, zoneKey: string) {
     const zone = zones.find((z) => z.key === zoneKey);
     if (!zone) return;
-    if (!loggedIn) {
-      toast.error("Log in to upload artwork.");
-      return;
-    }
     if (!ACCEPTED.includes(file.type)) {
       toast.error("Upload a PNG, JPG, or WebP image.");
       return;
@@ -427,7 +423,8 @@ function Customizer({ product, loggedIn, catalog, mine, shippingNote, initialCol
 
   async function addToCart() {
     if (!loggedIn) {
-      router.push("/login");
+      // Your design is kept in this browser, so it is waiting when you come back.
+      router.push(`/login?next=${encodeURIComponent(`/products/${product.slug}/design`)}`);
       return;
     }
     if (!variant) return;
@@ -800,6 +797,7 @@ function Customizer({ product, loggedIn, catalog, mine, shippingNote, initialCol
               uploading={uploading}
               onPick={pickDesign}
               onUpload={() => openPicker(activeZone.key)}
+              loginHref={`/login?next=${encodeURIComponent(`/products/${product.slug}/design`)}`}
             />
           )}
 

@@ -14,6 +14,8 @@ type Props = {
   uploading: boolean;
   onPick: (design: DesignDTO) => void;
   onUpload: () => void;
+  // where "Log in" leads: back to this design afterwards
+  loginHref?: string;
 };
 
 // Choose a ready-made design, one of your earlier uploads, or upload a new file.
@@ -25,6 +27,7 @@ export default function DesignPicker({
   uploading,
   onPick,
   onUpload,
+  loginHref = "/login",
 }: Props) {
   const [tab, setTab] = useState<Tab>(catalog.length > 0 ? "library" : "mine");
   const items = tab === "library" ? catalog : mine;
@@ -51,17 +54,10 @@ export default function DesignPicker({
       </div>
 
       <div className="picker-grid">
-        {loggedIn ? (
-          <button
-            type="button"
-            className="picker-upload"
-            disabled={uploading}
-            onClick={onUpload}
-          >
-            <span aria-hidden="true">{uploading ? "…" : "+"}</span>
-            {uploading ? "Uploading" : "Upload"}
-          </button>
-        ) : null}
+        <button type="button" className="picker-upload" disabled={uploading} onClick={onUpload}>
+          <span aria-hidden="true">{uploading ? "…" : "+"}</span>
+          {uploading ? "Uploading" : "Upload"}
+        </button>
 
         {items.map((d) => (
           <button
@@ -91,8 +87,8 @@ export default function DesignPicker({
 
       {!loggedIn && (
         <p className="login-note">
-          <Link href="/login">Log in</Link> or <Link href="/signup">create an account</Link> to
-          upload your own artwork and add to cart.
+          Try anything out for free. <Link href={loginHref}>Log in</Link> or{" "}
+          <Link href="/signup">create an account</Link> when you are ready to add it to your cart.
         </p>
       )}
     </div>

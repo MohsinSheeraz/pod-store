@@ -27,7 +27,9 @@ export default function LoginPage() {
     }
 
     toast.success("Logged in.");
-    router.push("/");
+    // Back to where they were (a same-site path only), otherwise home.
+    const next = new URLSearchParams(window.location.search).get("next");
+    router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
     router.refresh();
   }
 

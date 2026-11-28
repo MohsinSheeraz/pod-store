@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { rateLimit, tooManyRequests } from "@/lib/rate-limit";
+import { clientIp, rateLimit, tooManyRequests } from "@/lib/rate-limit";
 import { saveUpload, storageMode } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -24,16 +24,18 @@ function sniffImageType(buf: Buffer): "png" | "jpg" | "webp" | null {
 const MIME = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" } as const;
 
 export async function POST(req: Request) {
+  // Anyone can try their artwork on a product; an account is only needed to order. A guest's
+  // upload belongs to nobody until they log in and add it to the cart (see /api/cart).
   const session = await auth();
-  if (!session) {
-    return NextResponse.json({ error: "Log in to upload artwork." }, { status: 401 });
-  }
+  const userId = session?.user?.id ?? null;
 
   if (storageMode() === "disabled") {
     return NextResponse.json({ error: "Uploads aren't available right now." }, { status: 503 });
   }
 
-  const limit = await rateLimit(`upload:${session.user.id}`, { limit: 40, windowSec: 3600 });
+  const limit = userId
+    ? await rateLimit(`upload:${userId}`, { limit: 40, windowSec: 3600 })
+    : await rateLimit(`upload-guest:${clientIp(req.headers)}`, { limit: 12, windowSec: 3600 });
   if (!limit.ok) return tooManyRequests(limit.retryAfter, "You've uploaded a lot of files. Try again later.");
 
   // Refuse oversized requests before reading them into memory.
@@ -72,7 +74,7 @@ export async function POST(req: Request) {
     data: {
       name: file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Untitled design",
       imageUrl: stored.url,
-      ownerId: session.user.id,
+      ownerId: userId,
     },
   });
 
