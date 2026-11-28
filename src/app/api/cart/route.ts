@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { FONT_KEYS, SCALE_MAX, SCALE_MIN, textLimit } from "@/lib/placement";
 import { exclusiveConflict, validatePlacement, type LayerSpec } from "@/lib/placement-rules";
 import { readImageSize } from "@/lib/image-size";
-import { readFileHead } from "@/lib/storage";
+import { DB_FILE_PREFIX, readFileHead } from "@/lib/storage";
 
 const FONTS: string[] = FONT_KEYS;
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -32,7 +32,9 @@ const validPlacement = (p: unknown) => {
 async function designAspect(imageUrl: string): Promise<number | null> {
   let head: Buffer | null = null;
 
-  if (imageUrl.startsWith("/")) {
+  if (imageUrl.startsWith(DB_FILE_PREFIX)) {
+    head = await readFileHead(imageUrl);
+  } else if (imageUrl.startsWith("/")) {
     const file = path.join(PUBLIC_DIR, imageUrl);
     if (!file.startsWith(PUBLIC_DIR + path.sep)) return null;
     try {

@@ -25,12 +25,12 @@ test("signRequest reproduces the signature in AWS's documentation", () => {
   assert.match(auth, /Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41/);
 });
 
-test("storage is S3 when a bucket is configured, local in development, off in production", () => {
+test("storage is S3 when a bucket is configured, local in development, the database in production", () => {
   const bucket = { S3_BUCKET: "b", S3_ACCESS_KEY_ID: "k", S3_SECRET_ACCESS_KEY: "s" };
   assert.equal(storageMode({ ...bucket, NODE_ENV: "production" }), "s3");
   assert.equal(storageMode({ ...bucket, NODE_ENV: "development" }), "s3");
   assert.equal(storageMode({ NODE_ENV: "development" }), "local");
   // Never fall back to the server's disk in production: files would vanish on redeploy.
-  assert.equal(storageMode({ NODE_ENV: "production" }), "disabled");
-  assert.equal(storageMode({ NODE_ENV: "production", S3_BUCKET: "b" }), "disabled");
+  assert.equal(storageMode({ NODE_ENV: "production" }), "database");
+  assert.equal(storageMode({ NODE_ENV: "production", S3_BUCKET: "b" }), "database");
 });

@@ -120,6 +120,15 @@ model ProductVariant {
 }
 
 // Artwork: uploaded by a customer, or published by admins in the catalog
+// Uploaded artwork kept in the database, used when no S3 bucket is configured.
+model UploadedFile {
+  id          String   @id @default(cuid())
+  contentType String
+  size        Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+}
+
 model Design {
   id          String           @id @default(cuid())
   name        String

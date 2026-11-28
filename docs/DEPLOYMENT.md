@@ -56,6 +56,11 @@ tax or VAT by region, use Stripe Tax or an accountant's advice instead of the fl
 
 ## 5. Uploads: object storage
 
+Without a bucket, uploads are stored in the database (table `UploadedFile`, served from
+`/api/files/<id>`). That works on any host with no extra account, but it grows the database and is
+slower than a bucket, so use a bucket once you have real traffic. Run `npm run db:deploy` so the
+table exists. Guest uploads that never become an order are never deleted automatically.
+
 Create a bucket on any S3-compatible service and set `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT` (blank
 for AWS), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and `S3_PUBLIC_URL`.
 

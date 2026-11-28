@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit, tooManyRequests } from "@/lib/rate-limit";
-import { saveUpload, storageMode } from "@/lib/storage";
+import { saveUpload } from "@/lib/storage";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -28,10 +28,6 @@ export async function POST(req: Request) {
   // upload belongs to nobody until they log in and add it to the cart (see /api/cart).
   const session = await auth();
   const userId = session?.user?.id ?? null;
-
-  if (storageMode() === "disabled") {
-    return NextResponse.json({ error: "Uploads aren't available right now." }, { status: 503 });
-  }
 
   const limit = userId
     ? await rateLimit(`upload:${userId}`, { limit: 40, windowSec: 3600 })

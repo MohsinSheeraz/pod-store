@@ -70,7 +70,7 @@ export function envProblems(env: Env = process.env) {
   }
 
   if (!env.S3_BUCKET) {
-    warnings.push("S3_BUCKET is not set: uploads are disabled (the local disk is not used in production).");
+    warnings.push("S3_BUCKET is not set: uploads are stored in the database. Fine to start; use a bucket as you grow.");
   }
   if (!env.SUPPORT_EMAIL) {
     warnings.push("SUPPORT_EMAIL is not set: the policy pages show a placeholder contact address.");

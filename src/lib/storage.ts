@@ -6,13 +6,17 @@ import { isProduction } from "@/lib/env";
 // Where uploaded artwork lives.
 //  - s3:       any S3-compatible bucket (AWS S3, Cloudflare R2, DigitalOcean Spaces, MinIO...)
 //  - local:    the public/uploads folder, for development only
-//  - disabled: production without a bucket. Uploads are refused rather than lost on redeploy.
+//  - database: production without a bucket. Files are kept in Postgres (a disk is lost on
+//              redeploy on most hosts). Fine to start with; move to a bucket as you grow.
 
-export type StorageMode = "s3" | "local" | "disabled";
+export type StorageMode = "s3" | "local" | "database";
+
+/** Where files stored in the database are served from (see app/api/files/[id]). */
+export const DB_FILE_PREFIX = "/api/files/";
 
 export function storageMode(env: Record<string, string | undefined> = process.env): StorageMode {
   if (env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY) return "s3";
-  return isProduction(env) ? "disabled" : "local";
+  return isProduction(env) ? "database" : "local";
 }
 
 // ---- AWS Signature Version 4 (just what a PUT / GET of one object needs) ------------------------
@@ -119,7 +123,14 @@ export async function saveUpload(buffer: Buffer, ext: string, contentType: strin
   const mode = storageMode();
   const name = `${randomUUID()}.${ext}`;
 
-  if (mode === "disabled") throw new Error("Uploads are not configured on this server.");
+  if (mode === "database") {
+    const { prisma } = await import("@/lib/prisma");
+    const row = await prisma.uploadedFile.create({
+      data: { contentType, size: buffer.length, data: new Uint8Array(buffer) },
+      select: { id: true },
+    });
+    return { key: `db/${row.id}`, url: `${DB_FILE_PREFIX}${row.id}` };
+  }
 
   if (mode === "s3") {
     const key = `uploads/${name}`;
@@ -138,6 +149,13 @@ export async function saveUpload(buffer: Buffer, ext: string, contentType: strin
  * Only files on our own storage are fetched, so this can't be pointed at other sites.
  */
 export async function readFileHead(url: string, bytes = 256 * 1024): Promise<Buffer | null> {
+  if (url.startsWith(DB_FILE_PREFIX)) {
+    const id = url.slice(DB_FILE_PREFIX.length);
+    if (!/^[a-z0-9]{10,40}$/.test(id)) return null;
+    const { prisma } = await import("@/lib/prisma");
+    const row = await prisma.uploadedFile.findUnique({ where: { id }, select: { data: true } });
+    return row ? Buffer.from(row.data).subarray(0, bytes) : null;
+  }
   const base = storagePublicBase();
   if (!base || !url.startsWith(base + "/")) return null;
   try {
